@@ -1,8 +1,8 @@
 use itertools::Itertools;
 use std::fmt;
 
-type Integer = i32;
-type Float = f32;
+pub type Integer = i32;
+pub type Float = f32;
 
 #[derive(Clone)]
 pub enum Value {
@@ -76,10 +76,10 @@ fn _parse_quoted_string(input: &str) -> Option<String> {
 
 impl From<String> for Value {
     fn from(value: String) -> Self {
-        if let Ok(i) = value.parse::<i32>() {
+        if let Ok(i) = value.parse::<Integer>() {
             return Value::Integer(i);
         }
-        if let Ok(f) = value.parse::<f32>() {
+        if let Ok(f) = value.parse::<Float>() {
             return Value::Float(f);
         }
         if let Some(s) = _parse_quoted_string(value.as_str()) {
@@ -111,7 +111,7 @@ pub trait FromValue: Sized {
     fn from_value(value: &Value) -> Option<Self>;
 }
 
-impl FromValue for i32 {
+impl FromValue for Integer {
     fn from_value(value: &Value) -> Option<Self> {
         if let Value::Integer(i) = value {
             Some(*i)
@@ -121,7 +121,7 @@ impl FromValue for i32 {
     }
 }
 
-impl FromValue for f32 {
+impl FromValue for Float {
     fn from_value(value: &Value) -> Option<Self> {
         if let Value::Float(f) = value {
             Some(*f)

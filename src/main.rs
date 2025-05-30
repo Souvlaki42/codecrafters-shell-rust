@@ -1,5 +1,5 @@
-use std::process;
-use utils::{get_input_tokenized, Arguments, BUILTINS};
+use std::{io::ErrorKind, process};
+use utils::{execute_external, get_input_tokenized, Arguments, BUILTINS};
 use which::which;
 
 mod utils;
@@ -16,7 +16,9 @@ fn main() {
         let cmd = args.cmd();
 
         // todo handle unknown command messages when strings are empty
-        if cmd == "exit" {
+        if cmd.is_empty() {
+            continue;
+        } else if cmd == "exit" {
             let exit_code = args.get(0, 0);
             process::exit(exit_code);
         } else if cmd == "echo" {
@@ -29,13 +31,28 @@ fn main() {
             } else {
                 match which(&exe_name) {
                     Ok(path) => println!("{} is {}", exe_name, path.display()),
-                    Err(_) => println!("{}: not found", exe_name),
+                    Err(_) => eprintln!("{}: not found", exe_name),
                 }
             }
-        } else if !cmd.is_empty() {
-            println!("{}: command not found", cmd);
         } else {
-            continue;
+            let raw_args = args.get_raw();
+            match execute_external(&cmd, raw_args) {
+                Ok((stdout, stderr, _)) => {
+                    println!("{}", stdout);
+                    eprintln!("{}", stderr);
+                }
+                Err(e) => {
+                    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                        if io_err.kind() == ErrorKind::NotFound {
+                            eprintln!("{}: command not found", cmd);
+                        } else {
+                            for cause in e.chain() {
+                                eprintln!("{}", cause);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
