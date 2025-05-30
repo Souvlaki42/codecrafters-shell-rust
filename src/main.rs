@@ -1,5 +1,6 @@
 use std::process;
 use utils::{get_input_tokenized, Arguments, BUILTINS};
+use which::which;
 
 mod utils;
 mod value;
@@ -22,11 +23,14 @@ fn main() {
             let values = args.get_all();
             println!("{}", values);
         } else if cmd == "type" {
-            let cmd_name = args.get(0, "".to_string());
-            if BUILTINS.contains(&cmd_name.as_str()) {
-                println!("{} is a shell builtin", cmd_name);
+            let exe_name = args.get(0, "".to_string());
+            if BUILTINS.contains(&exe_name.as_str()) {
+                println!("{} is a shell builtin", exe_name);
             } else {
-                println!("{}: not found", cmd_name);
+                match which(&exe_name) {
+                    Ok(path) => println!("{} is {}", exe_name, path.display()),
+                    Err(_) => println!("{}: not found", exe_name),
+                }
             }
         } else if !cmd.is_empty() {
             println!("{}: command not found", cmd);
