@@ -1,7 +1,4 @@
-use std::{
-    io::{self, Write},
-    process::Command,
-};
+use std::process::Command;
 
 use anyhow::{Context, Ok};
 
@@ -10,22 +7,52 @@ use crate::value::{FromValue, Integer, Value};
 pub const BUILTINS: [&str; 3] = ["echo", "type", "exit"];
 
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
+    use std::io::{self, Write};
+
     print!("$ ");
     io::stdout().flush()?;
+
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
+    let input = input.trim();
+
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
     let mut inside_string = false;
-    Ok(input
-        .trim()
-        .split(|c| {
-            if c == '\'' || c == '"' {
-                inside_string = !inside_string;
+    let mut quote_char = '\0';
+
+    while let Some(c) = chars.next() {
+        if inside_string {
+            if c == quote_char {
+                inside_string = false;
+            } else if c == '\\' {
+                // Handle escaped characters inside quotes
+                if let Some(next_char) = chars.next() {
+                    current.push(next_char);
+                }
+            } else {
+                current.push(c);
             }
-            !inside_string && c == ' '
-        })
-        .map(|token| token.to_string())
-        .collect())
+        } else if c == '\'' || c == '"' {
+            inside_string = true;
+            quote_char = c;
+        } else if c.is_whitespace() {
+            if !current.is_empty() {
+                tokens.push(current.clone());
+                current.clear();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    Ok(tokens)
 }
 
 pub fn execute_external(cmd: &str, args: Vec<String>) -> anyhow::Result<(String, String, Integer)> {
