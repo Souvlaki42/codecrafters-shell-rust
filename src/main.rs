@@ -9,10 +9,10 @@ mod utils;
 mod value;
 
 fn main() {
-    loop {
-        print!("$ ");
-        io::stdout().flush().expect("Failed to flush stdout");
+    print!("$ ");
+    io::stdout().flush().expect("Failed to flush stdout");
 
+    loop {
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
@@ -21,7 +21,7 @@ fn main() {
         let args = Arguments::new(tokens);
         let cmd = args.cmd();
 
-        // todo handle unknown command messages when strings are empty
+        // Todo handle unknown command messages when strings are empty
         if cmd.is_empty() {
             continue;
         } else if cmd == "exit" {
@@ -45,9 +45,7 @@ fn main() {
             match execute_external(&cmd, raw_args) {
                 Ok((stdout, stderr, _)) => {
                     println!("{}", stdout);
-                    io::stdout().flush().expect("Flush failed");
                     eprintln!("{}", stderr);
-                    io::stderr().flush().expect("Flush failed");
                 }
                 Err(e) => {
                     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
@@ -59,9 +57,11 @@ fn main() {
                             }
                         }
                     }
-                    io::stderr().flush().expect("Flush failed");
                 }
             }
         }
+
+        print!("$ ");
+        io::stdout().flush().expect("Failed to flush stdout");
     }
 }

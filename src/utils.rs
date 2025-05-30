@@ -1,7 +1,4 @@
-use std::{
-    io::{self, Write},
-    process::Command,
-};
+use std::{io, process::Command};
 
 use anyhow::{Context, Ok};
 
