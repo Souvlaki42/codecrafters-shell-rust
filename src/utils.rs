@@ -2,6 +2,8 @@ use std::io::{self, Write};
 
 use crate::value::{FromValue, Value};
 
+pub const BUILTINS: [&str; 3] = ["echo", "type", "exit"];
+
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     print!("$ ");
     io::stdout().flush()?;
