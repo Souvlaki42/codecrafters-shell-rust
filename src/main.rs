@@ -1,30 +1,29 @@
-use std::{
-    io::{self, Write},
-    process,
-};
+use std::process;
+use utils::{get_input_tokenized, Arguments};
+
+mod utils;
+mod value;
 
 fn main() {
     loop {
-        print!("$ ");
-        io::stdout().flush().unwrap();
-        let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        let tokens = get_input_tokenized().unwrap_or_else(|e| {
+            eprintln!("Tokenizer failed: {}", e);
+            process::exit(1);
+        });
 
-        let mut inside_string = false;
-        let cmd: Vec<&str> = input
-            .split(|c| {
-                if c == '\'' || c == '"' {
-                    inside_string = !inside_string;
-                }
-                !inside_string && c == ' '
-            })
-            .map(|token| token.trim())
-            .collect();
+        let args = Arguments::new(tokens);
+        let cmd = args.cmd();
 
-        if cmd.len() == 2 && cmd[0] == "exit" {
-            process::exit(cmd[1].parse().unwrap())
+        if cmd == "exit" {
+            let exit_code = args.get(0, 0);
+            process::exit(exit_code);
+        } else if cmd == "echo" {
+            let values = args.get_all();
+            println!("{}", values);
+        } else if !cmd.is_empty() {
+            println!("{}: command not found", cmd);
         } else {
-            println!("{}: command not found", input.trim());
+            continue;
         }
     }
 }
