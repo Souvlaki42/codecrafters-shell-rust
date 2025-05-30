@@ -1,4 +1,7 @@
-use std::{io::ErrorKind, process};
+use std::{
+    io::{self, ErrorKind, Write},
+    process,
+};
 use utils::{execute_external, get_input_tokenized, Arguments, BUILTINS};
 use which::which;
 
@@ -7,6 +10,9 @@ mod value;
 
 fn main() {
     loop {
+        print!("$ ");
+        io::stdout().flush().expect("Failed to flush stdout");
+
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
