@@ -45,7 +45,9 @@ fn main() {
             match execute_external(&cmd, raw_args) {
                 Ok((stdout, stderr, _)) => {
                     println!("{}", stdout);
+                    io::stdout().flush().expect("Flush failed");
                     eprintln!("{}", stderr);
+                    io::stderr().flush().expect("Flush failed");
                 }
                 Err(e) => {
                     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
@@ -57,6 +59,7 @@ fn main() {
                             }
                         }
                     }
+                    io::stderr().flush().expect("Flush failed");
                 }
             }
         }
