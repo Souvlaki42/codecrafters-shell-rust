@@ -7,7 +7,7 @@ use anyhow::{Context, Ok};
 
 use crate::value::{FromValue, Integer, Value};
 
-pub const BUILTINS: [&str; 4] = ["echo", "type", "exit", "pwd"];
+pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     print!("$ ");

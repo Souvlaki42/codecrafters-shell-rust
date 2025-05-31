@@ -1,6 +1,7 @@
 use std::{
     env,
     io::{self, ErrorKind, Write},
+    path::Path,
     process,
 };
 use utils::{execute_external, get_input_tokenized, Arguments, BUILTINS};
@@ -45,6 +46,12 @@ fn main() {
                     .expect("Failed to get current working directory")
                     .to_string_lossy()
             );
+        } else if cmd == "cd" {
+            let path_string = args.get(0, "~".to_string());
+            let path = Path::new(&path_string);
+            env::set_current_dir(path).unwrap_or_else(|_| {
+                eprintln!("cd: {}: No such file or directory", path.to_string_lossy())
+            });
         } else {
             let raw_args = args.get_raw();
             match execute_external(&cmd, raw_args) {
