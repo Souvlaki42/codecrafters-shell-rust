@@ -9,10 +9,10 @@ mod utils;
 mod value;
 
 fn main() {
-    print!("$ ");
-    io::stdout().flush().expect("Failed to flush stdout");
-
     loop {
+        print!("$ ");
+        io::stdout().flush().expect("Failed to flush stdout");
+
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
@@ -43,9 +43,8 @@ fn main() {
         } else {
             let raw_args = args.get_raw();
             match execute_external(&cmd, raw_args) {
-                Ok((stdout, stderr, _)) => {
+                Ok((stdout, _, _)) => {
                     println!("{}", stdout);
-                    eprintln!("{}", stderr);
                 }
                 Err(e) => {
                     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
@@ -60,8 +59,5 @@ fn main() {
                 }
             }
         }
-
-        print!("$ ");
-        io::stdout().flush().expect("Failed to flush stdout");
     }
 }
