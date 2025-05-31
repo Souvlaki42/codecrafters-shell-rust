@@ -1,5 +1,5 @@
 use std::{
-    io::{self, Write},
+    io::{self, ErrorKind, Write},
     process,
 };
 use utils::{execute_external, get_input_tokenized, Arguments, BUILTINS};
@@ -42,8 +42,21 @@ fn main() {
             }
         } else {
             let raw_args = args.get_raw();
-            if let Ok((stdout, _, _)) = execute_external(&cmd, raw_args) {
-                println!("{}", stdout);
+            match execute_external(&cmd, raw_args) {
+                Ok((stdout, _, _)) => {
+                    println!("{}", stdout);
+                }
+                Err(e) => {
+                    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                        if io_err.kind() == ErrorKind::NotFound {
+                            eprintln!("{}: command not found", cmd);
+                        } else {
+                            for cause in e.chain() {
+                                eprintln!("{}", cause);
+                            }
+                        }
+                    }
+                }
             }
         }
 
