@@ -1,37 +1,73 @@
+#[cfg(test)]
+mod tests;
+
+use anyhow::Context;
 use std::{
     env,
     io::{self, ErrorKind, Write},
     path::Path,
-    process,
+    process::{self, Command},
 };
 use token::get_input_tokenized;
-use utils::{execute_external, Arguments, BUILTINS};
+use value::{Integer, Value};
 use which::which;
 
+mod strings;
 mod token;
-mod utils;
 mod value;
 
+const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "clear"];
+
+fn execute_external(cmd: &str, args: &Vec<String>) -> anyhow::Result<(String, String, Integer)> {
+    let process = Command::new(cmd)
+        .args(args)
+        .spawn()
+        .context("Running process error")?;
+
+    let output = process
+        .wait_with_output()
+        .context("Retrieving output error")?;
+
+    let stdout = String::from_utf8(output.stdout).context("Translating stdout error")?;
+    let stderr = String::from_utf8(output.stderr).context("Translating stderr error")?;
+    let status = output.status.code().unwrap_or_default();
+
+    Ok((stdout, stderr, status))
+}
+
 fn main() {
+    // Only show prompt in interactive mode
+    let is_interactive = atty::is(atty::Stream::Stdin);
+
     loop {
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
         });
 
-        let args = Arguments::new(tokens);
-        let cmd = args.cmd();
+        #[cfg(debug_assertions)]
+        if is_interactive {
+            println!("{:?}", tokens);
+        }
+
+        let (first, rest) = tokens.split_first().expect("Command not found!");
+        let name = first.to_string();
+        let raw_args = rest.to_vec();
+        let args = Value::from_iter(raw_args.clone());
 
         // Todo: handle unknown command messages when strings are empty
-        if cmd.is_empty() {
+        if name.is_empty() {
             continue;
-        } else if cmd == "exit" {
+        } else if name == "exit" {
             let exit_code = args.get(0, 0);
             process::exit(exit_code);
-        } else if cmd == "echo" {
-            let values = args.get_all();
-            println!("{}", values);
-        } else if cmd == "type" {
+        } else if name == "echo" {
+            println!("{}", args);
+        } else if name == "clear" {
+            if is_interactive {
+                clearscreen::clear().expect("Failed to clear screen");
+            }
+        } else if name == "type" {
             let exe_name = args.get(0, "");
             if BUILTINS.contains(&exe_name) {
                 println!("{} is a shell builtin", exe_name);
@@ -41,14 +77,14 @@ fn main() {
                     Err(_) => eprintln!("{}: not found", exe_name),
                 }
             }
-        } else if cmd == "pwd" {
+        } else if name == "pwd" {
             println!(
                 "{}",
                 env::current_dir()
                     .expect("Failed to get current working directory")
                     .to_string_lossy()
             );
-        } else if cmd == "cd" {
+        } else if name == "cd" {
             // Todo: Use https://crates.io/crates/shellexpand
             let home = std::env::var("HOME").expect("Home directory not found");
             let path_string = args.get(0, "~").replace("~", &home);
@@ -57,8 +93,8 @@ fn main() {
                 eprintln!("cd: {}: No such file or directory", path.to_string_lossy())
             });
         } else {
-            let raw_args = args.get_raw();
-            match execute_external(&cmd, raw_args) {
+            // Todo: make sure external stdout has a new line at the end
+            match execute_external(&name, &raw_args) {
                 Ok((stdout, stderr, _)) => {
                     print!("{}", stdout);
                     io::stdout().flush().expect("Failed to flush stdout");
@@ -68,7 +104,7 @@ fn main() {
                 Err(e) => {
                     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
                         if io_err.kind() == ErrorKind::NotFound {
-                            eprintln!("{}: command not found", cmd);
+                            eprintln!("{}: command not found", name);
                         } else {
                             for cause in e.chain() {
                                 eprintln!("{}", cause);

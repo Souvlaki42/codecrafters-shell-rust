@@ -1,3 +1,4 @@
+use crate::strings;
 use itertools::Itertools;
 use std::fmt;
 
@@ -12,6 +13,7 @@ pub enum Value {
     Array(Vec<Value>),
     Anything(String),
 }
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -39,64 +41,6 @@ impl Value {
     }
 }
 
-/// Helper function to unescape strings
-fn _unescape_string(s: &str) -> String {
-    let mut result = String::new();
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '\\' {
-            if let Some(next) = chars.next() {
-                result.push(next);
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-fn _parse_quoted_string(input: &str) -> Option<String> {
-    let bytes = input.as_bytes();
-    if bytes.len() < 2 {
-        return None;
-    }
-    let first = bytes[0];
-    let last = bytes[bytes.len() - 1];
-
-    if (first == b'\'' || first == b'"') && first == last {
-        let inner = &input[1..input.len() - 1];
-        let quote_char = first as char;
-
-        let mut result = String::new();
-        let chars = inner.chars();
-        let mut escaped = false;
-
-        for c in chars {
-            if escaped {
-                // Accept any escaped character literally
-                result.push(c);
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == quote_char {
-                // Unescaped quote of the same kind inside string is invalid
-                return None;
-            } else {
-                result.push(c);
-            }
-        }
-
-        if escaped {
-            // Trailing backslash without escaped char is invalid
-            return None;
-        }
-
-        Some(result)
-    } else {
-        None
-    }
-}
-
 impl From<String> for Value {
     fn from(value: String) -> Self {
         // Try parse as Integer
@@ -108,72 +52,11 @@ impl From<String> for Value {
             return Value::Float(f);
         }
 
-        // Try parse as a fully quoted string
-        if let Some(s) = _parse_quoted_string(&value) {
-            return Value::String(s);
+        // Process the string according to shell rules
+        match strings::process_string(&value) {
+            Ok(parsed) => Value::String(parsed),
+            Err(_) => Value::Anything(value),
         }
-
-        // If string contains quotes, parse mixed quoted/unquoted parts
-        if value.contains('\'') || value.contains('"') {
-            let mut result = String::new();
-            let chars = value.chars().peekable();
-            let mut current_part = String::new();
-            let mut in_quote: Option<char> = None;
-            let mut escaped = false;
-
-            for c in chars {
-                if escaped {
-                    current_part.push(c);
-                    escaped = false;
-                    continue;
-                }
-
-                match c {
-                    '\\' => {
-                        escaped = true;
-                    }
-                    '\'' | '"' => {
-                        if let Some(q) = in_quote {
-                            if c == q {
-                                // Closing quote: unescape current_part and append
-                                let unescaped = _unescape_string(&current_part);
-                                result.push_str(&unescaped);
-                                current_part.clear();
-                                in_quote = None;
-                            } else {
-                                // Different quote inside quote: keep as is
-                                current_part.push(c);
-                            }
-                        } else {
-                            // Opening quote
-                            in_quote = Some(c);
-                        }
-                    }
-                    _ => {
-                        if in_quote.is_some() {
-                            current_part.push(c);
-                        } else {
-                            result.push(c);
-                        }
-                    }
-                }
-            }
-
-            // If still inside quote, invalid input; fallback to Anything
-            if in_quote.is_some() || escaped {
-                return Value::Anything(value);
-            }
-
-            // Append any trailing unquoted part
-            if !current_part.is_empty() {
-                result.push_str(&current_part);
-            }
-
-            return Value::String(result);
-        }
-
-        // Default fallback
-        Value::Anything(value)
     }
 }
 
@@ -227,6 +110,7 @@ impl<'a> FromValue<'a> for &'a str {
         }
     }
 }
+
 impl<'a> FromValue<'a> for String {
     fn from_value(value: &'a Value) -> Option<Self> {
         match value {
