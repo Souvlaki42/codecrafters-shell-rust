@@ -7,7 +7,23 @@ use anyhow::{Context, Ok};
 
 use crate::value::{FromValue, Integer, Value};
 
+// Todo: add clear builtin
 pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
+
+pub fn trim_whitespace(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut first = true;
+
+    for word in s.split_whitespace() {
+        if !first {
+            result.push(' ');
+        }
+        result.push_str(word);
+        first = false;
+    }
+
+    result
+}
 
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     print!("$ ");
@@ -17,8 +33,7 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     io::stdin().read_line(&mut input)?;
 
     let mut inside_string = false;
-    Ok(input
-        .trim()
+    Ok(trim_whitespace(&input)
         .split(|c| {
             if c == '\'' || c == '"' {
                 inside_string = !inside_string;
