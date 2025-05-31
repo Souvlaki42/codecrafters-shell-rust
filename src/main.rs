@@ -1,4 +1,5 @@
 use std::{
+    env,
     io::{self, ErrorKind, Write},
     process,
 };
@@ -10,9 +11,6 @@ mod value;
 
 fn main() {
     loop {
-        print!("$ ");
-        io::stdout().flush().expect("Failed to flush stdout");
-
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
@@ -40,6 +38,13 @@ fn main() {
                     Err(_) => eprintln!("{}: not found", exe_name),
                 }
             }
+        } else if cmd == "pwd" {
+            println!(
+                "{}",
+                env::current_dir()
+                    .expect("Failed to get current working directory")
+                    .to_string_lossy()
+            );
         } else {
             let raw_args = args.get_raw();
             match execute_external(&cmd, raw_args) {

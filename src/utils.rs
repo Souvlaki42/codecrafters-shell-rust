@@ -1,12 +1,18 @@
-use std::{io, process::Command};
+use std::{
+    io::{self, Write},
+    process::Command,
+};
 
 use anyhow::{Context, Ok};
 
 use crate::value::{FromValue, Integer, Value};
 
-pub const BUILTINS: [&str; 3] = ["echo", "type", "exit"];
+pub const BUILTINS: [&str; 4] = ["echo", "type", "exit", "pwd"];
 
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
+    print!("$ ");
+    io::stdout().flush().expect("Failed to flush stdout");
+
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
