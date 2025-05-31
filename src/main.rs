@@ -1,5 +1,5 @@
 use std::{
-    io::{self, ErrorKind, Write},
+    io::{self, Write},
     process,
 };
 use utils::{execute_external, get_input_tokenized, Arguments, BUILTINS};
@@ -9,10 +9,10 @@ mod utils;
 mod value;
 
 fn main() {
-    loop {
-        print!("$ ");
-        io::stdout().flush().expect("Failed to flush stdout");
+    print!("$ ");
+    io::stdout().flush().expect("Failed to flush stdout");
 
+    loop {
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
@@ -46,5 +46,8 @@ fn main() {
                 println!("{}", stdout);
             }
         }
+
+        print!("$ ");
+        io::stdout().flush().expect("Failed to flush stdout");
     }
 }
