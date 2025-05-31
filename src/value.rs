@@ -27,15 +27,13 @@ impl fmt::Display for Value {
 }
 
 impl Value {
-    /// Get the inner value of type `T` at `index` if self is an Array,
-    /// otherwise try to extract `T` from self itself.
-    /// Returns `default` if extraction fails.
-    pub fn get<T: FromValue + Default>(&self, index: usize, default: T) -> T {
+    pub fn get<'a, T: FromValue<'a> + Default>(&'a self, index: usize, default: T) -> T {
         match self {
             Self::Array(vec) => vec
                 .get(index)
                 .and_then(|v| T::from_value(v))
                 .unwrap_or(default),
+            Self::Anything(s) if s.is_empty() => default,
             _ => T::from_value(self).unwrap_or(default),
         }
     }
@@ -107,11 +105,11 @@ impl FromIterator<String> for Value {
     }
 }
 
-pub trait FromValue: Sized {
-    fn from_value(value: &Value) -> Option<Self>;
+pub trait FromValue<'a>: Sized {
+    fn from_value(value: &'a Value) -> Option<Self>;
 }
 
-impl FromValue for Integer {
+impl<'a> FromValue<'a> for Integer {
     fn from_value(value: &Value) -> Option<Self> {
         if let Value::Integer(i) = value {
             Some(*i)
@@ -121,7 +119,7 @@ impl FromValue for Integer {
     }
 }
 
-impl FromValue for Float {
+impl<'a> FromValue<'a> for Float {
     fn from_value(value: &Value) -> Option<Self> {
         if let Value::Float(f) = value {
             Some(*f)
@@ -131,11 +129,20 @@ impl FromValue for Float {
     }
 }
 
-impl FromValue for String {
-    fn from_value(value: &Value) -> Option<Self> {
+impl<'a> FromValue<'a> for &'a str {
+    fn from_value(value: &'a Value) -> Option<Self> {
         match value {
-            Value::String(s) => Some(s.clone()),
-            Value::Anything(s) => Some(s.clone()),
+            Value::String(s) => Some(s.as_str()),
+            Value::Anything(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+}
+impl<'a> FromValue<'a> for String {
+    fn from_value(value: &'a Value) -> Option<Self> {
+        match value {
+            Value::String(s) => Some(s.to_string()),
+            Value::Anything(s) => Some(s.to_string()),
             _ => None,
         }
     }

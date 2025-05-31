@@ -65,7 +65,7 @@ impl Arguments {
             _raw_args,
         }
     }
-    pub fn get<T: FromValue + Default>(&self, idx: usize, default: T) -> T {
+    pub fn get<'a, T: FromValue<'a> + Default>(&'a self, idx: usize, default: T) -> T {
         self._args.get(idx, default)
     }
     pub fn get_all(&self) -> Value {

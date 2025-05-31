@@ -20,7 +20,7 @@ fn main() {
         let args = Arguments::new(tokens);
         let cmd = args.cmd();
 
-        // Todo handle unknown command messages when strings are empty
+        // Todo: handle unknown command messages when strings are empty
         if cmd.is_empty() {
             continue;
         } else if cmd == "exit" {
@@ -30,11 +30,11 @@ fn main() {
             let values = args.get_all();
             println!("{}", values);
         } else if cmd == "type" {
-            let exe_name = args.get(0, "".to_string());
-            if BUILTINS.contains(&exe_name.as_str()) {
+            let exe_name = args.get(0, "");
+            if BUILTINS.contains(&exe_name) {
                 println!("{} is a shell builtin", exe_name);
             } else {
-                match which(&exe_name) {
+                match which(exe_name) {
                     Ok(path) => println!("{} is {}", exe_name, path.display()),
                     Err(_) => eprintln!("{}: not found", exe_name),
                 }
@@ -47,7 +47,9 @@ fn main() {
                     .to_string_lossy()
             );
         } else if cmd == "cd" {
-            let path_string = args.get(0, "~".to_string());
+            // Todo: Use https://crates.io/crates/shellexpand
+            let home = std::env::var("HOME").expect("Home directory not found");
+            let path_string = args.get(0, "~").replace("~", &home);
             let path = Path::new(&path_string);
             env::set_current_dir(path).unwrap_or_else(|_| {
                 eprintln!("cd: {}: No such file or directory", path.to_string_lossy())
