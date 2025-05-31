@@ -4,9 +4,11 @@ use std::{
     path::Path,
     process,
 };
-use utils::{execute_external, get_input_tokenized, Arguments, BUILTINS};
+use token::get_input_tokenized;
+use utils::{execute_external, Arguments, BUILTINS};
 use which::which;
 
+mod token;
 mod utils;
 mod value;
 
