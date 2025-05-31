@@ -42,21 +42,8 @@ fn main() {
             }
         } else {
             let raw_args = args.get_raw();
-            match execute_external(&cmd, raw_args) {
-                Ok((stdout, _, _)) => {
-                    println!("{}", stdout);
-                }
-                Err(e) => {
-                    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
-                        if io_err.kind() == ErrorKind::NotFound {
-                            eprintln!("{}: command not found", cmd);
-                        } else {
-                            for cause in e.chain() {
-                                eprintln!("{}", cause);
-                            }
-                        }
-                    }
-                }
+            if let Ok((stdout, _, _)) = execute_external(&cmd, raw_args) {
+                println!("{}", stdout);
             }
         }
     }
