@@ -12,33 +12,48 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current_token = String::new();
     let chars = input.chars().peekable();
-    let mut in_quote: Option<char> = None;
 
-    // First pass: split into tokens while preserving quotes
+    let mut in_quote: Option<char> = None;
+    let mut escaped = false;
+
     for c in chars {
+        if escaped {
+            // Previous char was backslash, so push current char literally
+            current_token.push(c);
+            escaped = false;
+            continue;
+        }
+
         match c {
+            '\\' => {
+                // Escape next char
+                escaped = true;
+            }
             '\'' | '"' if in_quote.is_none() => {
-                // Start of quote
+                // Start quote
                 in_quote = Some(c);
                 current_token.push(c);
             }
             c if in_quote == Some(c) => {
-                // End of quote
-                current_token.push(c);
+                // End quote
                 in_quote = None;
+                current_token.push(c);
             }
             ' ' | '\t' if in_quote.is_none() => {
-                // Token delimiter outside quotes
+                // Space outside quotes and not escaped: token delimiter
                 if !current_token.is_empty() {
                     tokens.push(current_token);
                     current_token = String::new();
                 }
             }
             _ => {
-                // Include everything else, including spaces inside quotes
                 current_token.push(c);
             }
         }
+    }
+
+    if escaped {
+        anyhow::bail!("Trailing escape character");
     }
 
     if in_quote.is_some() {
@@ -49,7 +64,7 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
         tokens.push(current_token);
     }
 
-    // Second pass: process each token to handle quotes and escapes
+    // Process tokens to handle quotes and escapes
     tokens
         .into_iter()
         .map(|token| strings::process_string(&token))
