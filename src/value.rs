@@ -52,11 +52,8 @@ impl From<String> for Value {
             return Value::Float(f);
         }
 
-        // Process the string according to shell rules
-        match strings::process_string(&value) {
-            Ok(parsed) => Value::String(parsed),
-            Err(_) => Value::Anything(value),
-        }
+        // Use the token as-is; tokenizer already processed it
+        Value::String(value)
     }
 }
 

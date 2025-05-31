@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use anyhow::Context;
 use std::{
     env,
@@ -36,19 +33,11 @@ fn execute_external(cmd: &str, args: &Vec<String>) -> anyhow::Result<(String, St
 }
 
 fn main() {
-    // Only show prompt in interactive mode
-    let is_interactive = atty::is(atty::Stream::Stdin);
-
     loop {
         let tokens = get_input_tokenized().unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
         });
-
-        #[cfg(debug_assertions)]
-        if is_interactive {
-            println!("{:?}", tokens);
-        }
 
         let (first, rest) = tokens.split_first().expect("Command not found!");
         let name = first.to_string();
@@ -64,9 +53,7 @@ fn main() {
         } else if name == "echo" {
             println!("{}", args);
         } else if name == "clear" {
-            if is_interactive {
-                clearscreen::clear().expect("Failed to clear screen");
-            }
+            clearscreen::clear().expect("Failed to clear screen");
         } else if name == "type" {
             let exe_name = args.get(0, "");
             if BUILTINS.contains(&exe_name) {

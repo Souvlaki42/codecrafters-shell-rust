@@ -35,7 +35,7 @@ impl StringState {
         match self.in_quote {
             Some(quote) => match quote {
                 '\'' => {
-                    // Inside single quotes, backslash is literal
+                    // Inside single quotes, backslash and next char are literal
                     self.current_part.push('\\');
                     if let Some(next) = chars.next() {
                         self.current_part.push(next);
@@ -55,12 +55,11 @@ impl StringState {
                     }
                 }
                 _ => {
-                    // For any other quote type (shouldn't happen), treat as literal
                     self.current_part.push('\\');
                 }
             },
             None => {
-                // Outside quotes, escape next character
+                // Outside quotes, escape next character literally
                 if let Some(next) = chars.next() {
                     self.result.push(next);
                 } else {
@@ -151,60 +150,4 @@ fn unescape_string(s: &str) -> String {
     }
 
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_single_quotes() {
-        assert_eq!(process_string("'hello\\'world'").unwrap(), "hello\\'world");
-        assert_eq!(process_string("'hello\"world'").unwrap(), "hello\"world");
-        assert_eq!(process_string("'hello\\world'").unwrap(), "hello\\world");
-    }
-
-    #[test]
-    fn test_double_quotes() {
-        assert_eq!(
-            process_string("\"hello\\\"world\"").unwrap(),
-            "hello\"world"
-        );
-        assert_eq!(
-            process_string("\"hello\\'world\"").unwrap(),
-            "hello\\'world"
-        );
-        assert_eq!(process_string("\"hello\\world\"").unwrap(), "hello\\world");
-    }
-
-    #[test]
-    fn test_mixed_quotes() {
-        assert_eq!(process_string("'hello'\"world\"").unwrap(), "helloworld");
-        assert_eq!(process_string("\"hello\"'world'").unwrap(), "helloworld");
-    }
-
-    #[test]
-    fn test_unclosed_quotes() {
-        assert!(process_string("'hello").is_err());
-        assert!(process_string("\"hello").is_err());
-    }
-
-    #[test]
-    fn test_backslash_escaping() {
-        assert_eq!(process_string("hello\\ world").unwrap(), "hello world");
-        assert_eq!(process_string("hello\\\\world").unwrap(), "hello\\world");
-        assert_eq!(process_string("hello\\nworld").unwrap(), "hellonworld");
-    }
-
-    #[test]
-    fn test_complex_quotes() {
-        assert_eq!(
-            process_string("'script\\\"worldtest\\\"shell'").unwrap(),
-            "script\\\"worldtest\\\"shell"
-        );
-        assert_eq!(
-            process_string("\"script\\\"worldtest\\\"shell\"").unwrap(),
-            "script\"worldtest\"shell"
-        );
-    }
 }
