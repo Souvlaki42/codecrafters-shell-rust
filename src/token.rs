@@ -18,7 +18,8 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
 
     for c in chars {
         if escaped {
-            // Previous char was backslash, so push current char literally
+            // Previous char was backslash, so push both backslash and this char literally
+            current_token.push('\\');
             current_token.push(c);
             escaped = false;
             continue;
@@ -26,21 +27,17 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
 
         match c {
             '\\' => {
-                // Escape next char
                 escaped = true;
             }
             '\'' | '"' if in_quote.is_none() => {
-                // Start quote
                 in_quote = Some(c);
                 current_token.push(c);
             }
             c if in_quote == Some(c) => {
-                // End quote
                 in_quote = None;
                 current_token.push(c);
             }
             ' ' | '\t' if in_quote.is_none() => {
-                // Space outside quotes and not escaped: token delimiter
                 if !current_token.is_empty() {
                     tokens.push(current_token);
                     current_token = String::new();
@@ -64,7 +61,7 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
         tokens.push(current_token);
     }
 
-    // Process tokens to handle quotes and escapes
+    // Now process tokens with strings::process_string to handle quoting and unescaping
     tokens
         .into_iter()
         .map(|token| strings::process_string(&token))
