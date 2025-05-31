@@ -10,21 +10,6 @@ use crate::value::{FromValue, Integer, Value};
 // Todo: add clear builtin
 pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 
-pub fn trim_whitespace(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut first = true;
-
-    for word in s.split_whitespace() {
-        if !first {
-            result.push(' ');
-        }
-        result.push_str(word);
-        first = false;
-    }
-
-    result
-}
-
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     print!("$ ");
     io::stdout().flush().expect("Failed to flush stdout");
@@ -32,16 +17,54 @@ pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
-    let mut inside_string = false;
-    Ok(trim_whitespace(&input)
-        .split(|c| {
-            if c == '\'' || c == '"' {
-                inside_string = !inside_string;
+    let mut tokens = Vec::new();
+    let mut current_token = String::new();
+    let mut inside_quotes = false;
+    let mut quote_char = '\0';
+    let mut escaped = false;
+
+    for c in input.trim().chars() {
+        if escaped {
+            current_token.push(c);
+            escaped = false;
+            continue;
+        }
+
+        match c {
+            '\\' => {
+                escaped = true;
             }
-            !inside_string && c == ' '
-        })
-        .map(|token| token.to_string())
-        .collect())
+            '\'' | '"' => {
+                if !inside_quotes {
+                    inside_quotes = true;
+                    quote_char = c;
+                } else if c == quote_char {
+                    inside_quotes = false;
+                } else {
+                    current_token.push(c);
+                }
+            }
+            ' ' => {
+                if !inside_quotes {
+                    if !current_token.is_empty() {
+                        tokens.push(current_token);
+                        current_token = String::new();
+                    }
+                } else {
+                    current_token.push(c);
+                }
+            }
+            _ => {
+                current_token.push(c);
+            }
+        }
+    }
+
+    if !current_token.is_empty() {
+        tokens.push(current_token);
+    }
+
+    Ok(tokens)
 }
 
 pub fn execute_external(cmd: &str, args: Vec<String>) -> anyhow::Result<(String, String, Integer)> {

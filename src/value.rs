@@ -74,17 +74,56 @@ fn _parse_quoted_string(input: &str) -> Option<String> {
 
 impl From<String> for Value {
     fn from(value: String) -> Self {
+        // First try to parse as number
         if let Ok(i) = value.parse::<Integer>() {
             return Value::Integer(i);
         }
         if let Ok(f) = value.parse::<Float>() {
             return Value::Float(f);
         }
-        if let Some(s) = _parse_quoted_string(value.as_str()) {
+
+        // Handle quoted strings
+        if let Some(s) = _parse_quoted_string(&value) {
             return Value::String(s);
         }
 
-        Value::Anything(value.clone())
+        // For unquoted strings, try to concatenate with adjacent quoted strings
+        if value.contains('\'') || value.contains('"') {
+            let mut result = String::new();
+            let mut current_quote = None;
+            let mut current_part = String::new();
+
+            for c in value.chars() {
+                match c {
+                    '\'' | '"' => {
+                        if current_quote.is_none() {
+                            current_quote = Some(c);
+                        } else if current_quote == Some(c) {
+                            current_quote = None;
+                            if !current_part.is_empty() {
+                                result.push_str(&current_part);
+                                current_part.clear();
+                            }
+                        } else {
+                            current_part.push(c);
+                        }
+                    }
+                    _ => {
+                        if current_quote.is_some() {
+                            current_part.push(c);
+                        } else {
+                            result.push(c);
+                        }
+                    }
+                }
+            }
+            if !current_part.is_empty() {
+                result.push_str(&current_part);
+            }
+            return Value::String(result);
+        }
+
+        Value::Anything(value)
     }
 }
 
