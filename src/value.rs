@@ -3,6 +3,7 @@ use std::fmt;
 
 pub type Integer = i32;
 pub type Float = f32;
+pub type Boolean = bool;
 
 #[derive(Clone)]
 pub enum Value {
