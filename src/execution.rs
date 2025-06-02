@@ -1,19 +1,22 @@
 use std::{
     env,
-    io::{self, Write},
+    io::Write,
     path::Path,
-    process::{self, Command},
+    process::{self, Command, Stdio},
 };
 
 use which::which;
 
-use crate::value::{Boolean, Integer, Value};
+use crate::{
+    io::Writer,
+    value::{Boolean, Integer, Value},
+};
 
 const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "clear"];
 
 /// Define a custom enum for the function's outcome and if it should be flushed.
-#[derive(Debug, PartialEq, Eq)]
-pub enum CommandOutput {
+#[derive(Debug, PartialEq, Eq, Clone)]
+enum CommandOutput {
     /// Command completed successfully, only stdout was produced.
     Stdout(String, Boolean),
     /// Command completed successfully, only stderr was produced.
@@ -27,46 +30,76 @@ pub enum CommandOutput {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CommandResult {
-    pub output: CommandOutput,
-    pub exit_code: Integer,
+    output: CommandOutput,
+    exit_code: Integer,
+    external: Boolean,
 }
 
-pub fn print_command_output(result: CommandResult) {
-    let CommandResult { output, .. } = result;
-    match output {
-        CommandOutput::Stdout(stdout, flush) => {
-            if flush {
-                print!("{}", stdout);
-                io::stdout().flush().unwrap();
-            } else {
-                println!("{}", stdout);
-            }
+impl CommandResult {
+    pub fn to_output(&self, out: &mut Writer) {
+        if self.external {
+            return;
         }
-        CommandOutput::Stderr(stderr, flush) => {
-            if flush {
-                eprint!("{}", stderr);
-                io::stderr().flush().unwrap();
-            } else {
-                eprintln!("{}", stderr);
+        let output = self.output.clone();
+        match output {
+            CommandOutput::Stdout(stdout, new_line) => {
+                out.write_all(stdout.as_bytes()).unwrap();
+                if new_line {
+                    out.write_all(b"\n").unwrap();
+                }
+                out.flush().unwrap();
             }
-        }
-        CommandOutput::StdoutAndStderr(stdout, stderr, flush) => {
-            if flush {
-                print!("{}", stdout);
-                io::stdout().flush().unwrap();
-                eprint!("{}", stderr);
-                io::stderr().flush().unwrap();
-            } else {
-                println!("{}", stdout);
-                eprintln!("{}", stderr);
+            CommandOutput::StdoutAndStderr(stdout, _, new_line) => {
+                out.write_all(stdout.as_bytes()).unwrap();
+                if new_line {
+                    out.write_all(b"\n").unwrap();
+                }
+                out.flush().unwrap();
             }
+            _ => {}
         }
-        CommandOutput::NoOutput => {}
+    }
+
+    pub fn to_error(&self, err: &mut Writer) {
+        if self.external {
+            return;
+        }
+        let output = self.output.clone();
+        match output {
+            CommandOutput::Stderr(stderr, new_line) => {
+                err.write_all(stderr.as_bytes()).unwrap();
+                if new_line {
+                    err.write_all(b"\n").unwrap();
+                }
+                err.flush().unwrap();
+            }
+            CommandOutput::StdoutAndStderr(_, stderr, new_line) => {
+                err.write_all(stderr.as_bytes()).unwrap();
+                if new_line {
+                    err.write_all(b"\n").unwrap();
+                }
+                err.flush().unwrap();
+            }
+            _ => {}
+        }
     }
 }
 
-fn execute_external(cmd: &str, args: &Vec<String>) -> CommandResult {
-    let process = match Command::new(cmd).args(args).spawn() {
+fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) -> CommandResult {
+    let stdout = match writers.0 {
+        Writer::File(file) => Stdio::from(file.try_clone().unwrap()),
+        _ => Stdio::inherit(),
+    };
+    let stderr = match writers.1 {
+        Writer::File(file) => Stdio::from(file.try_clone().unwrap()),
+        _ => Stdio::inherit(),
+    };
+    let process = match Command::new(cmd)
+        .stdout(stdout)
+        .stderr(stderr)
+        .args(args)
+        .spawn()
+    {
         Ok(process) => process,
         Err(e) => {
             return CommandResult {
@@ -75,6 +108,7 @@ fn execute_external(cmd: &str, args: &Vec<String>) -> CommandResult {
                     true,
                 ),
                 exit_code: 1,
+                external: true,
             };
         }
     };
@@ -85,6 +119,7 @@ fn execute_external(cmd: &str, args: &Vec<String>) -> CommandResult {
             return CommandResult {
                 output: CommandOutput::Stderr(format!("Retrieving output error: {}\n", e), true),
                 exit_code: 1,
+                external: true,
             };
         }
     };
@@ -95,6 +130,7 @@ fn execute_external(cmd: &str, args: &Vec<String>) -> CommandResult {
             return CommandResult {
                 output: CommandOutput::Stderr(format!("Translating stdout error: {}\n", e), true),
                 exit_code: 1,
+                external: true,
             };
         }
     };
@@ -104,6 +140,7 @@ fn execute_external(cmd: &str, args: &Vec<String>) -> CommandResult {
             return CommandResult {
                 output: CommandOutput::Stderr(format!("Translating stderr error: {}\n", e), true),
                 exit_code: 1,
+                external: true,
             };
         }
     };
@@ -112,14 +149,21 @@ fn execute_external(cmd: &str, args: &Vec<String>) -> CommandResult {
     CommandResult {
         output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
         exit_code: status,
+        external: true,
     }
 }
 
-pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResult {
+pub fn execute(
+    name: String,
+    args: Value,
+    raw_args: Vec<String>,
+    writers: (&Writer, &Writer),
+) -> CommandResult {
     if name.is_empty() {
         CommandResult {
             output: CommandOutput::NoOutput,
             exit_code: 0,
+            external: false,
         }
     } else if name == "exit" {
         let exit_code = args.get(0, 0);
@@ -128,6 +172,7 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
         return CommandResult {
             output: CommandOutput::Stdout(format!("{}", args), false),
             exit_code: 0,
+            external: false,
         };
     } else if name == "clear" {
         match clearscreen::clear() {
@@ -135,12 +180,14 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
                 return CommandResult {
                     output: CommandOutput::NoOutput,
                     exit_code: 0,
+                    external: false,
                 }
             }
             Err(e) => {
                 return CommandResult {
                     output: CommandOutput::Stderr(format!("Clearing screen error: {}", e), false),
                     exit_code: 1,
+                    external: false,
                 };
             }
         }
@@ -150,6 +197,7 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
             return CommandResult {
                 output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name), false),
                 exit_code: 0,
+                external: false,
             };
         } else {
             match which(exe_name) {
@@ -159,10 +207,12 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
                         false,
                     ),
                     exit_code: 0,
+                    external: false,
                 },
                 Err(_) => CommandResult {
                     output: CommandOutput::Stderr(format!("{}: not found", exe_name), false),
                     exit_code: 1,
+                    external: false,
                 },
             }
         }
@@ -178,6 +228,7 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
                 false,
             ),
             exit_code: 0,
+            external: false,
         };
     } else if name == "cd" {
         // Todo: Use https://crates.io/crates/shellexpand
@@ -188,6 +239,7 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
             Ok(_) => CommandResult {
                 output: CommandOutput::NoOutput,
                 exit_code: 0,
+                external: false,
             },
             Err(_) => CommandResult {
                 output: CommandOutput::Stderr(
@@ -195,10 +247,11 @@ pub fn execute(name: String, args: Value, raw_args: Vec<String>) -> CommandResul
                     false,
                 ),
                 exit_code: 1,
+                external: false,
             },
         }
     } else {
         // Todo: make sure external stdout has a new line at the end
-        execute_external(&name, &raw_args)
+        execute_external(&name, &raw_args, writers)
     }
 }
