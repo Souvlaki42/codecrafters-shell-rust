@@ -2,6 +2,7 @@ use crate::strings;
 use std::io::{self, Write};
 
 pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
+    io::stdout().flush()?;
     print!("$ ");
     io::stdout().flush()?;
 

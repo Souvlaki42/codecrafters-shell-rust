@@ -18,12 +18,12 @@ const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "clear"];
 #[derive(Debug, PartialEq, Eq, Clone)]
 enum CommandOutput {
     /// Command completed successfully, only stdout was produced.
-    Stdout(String, Boolean),
+    Stdout(String),
     /// Command completed successfully, only stderr was produced.
-    Stderr(String, Boolean),
+    Stderr(String),
     /// Command completed successfully, both stdout and stderr were produced.
     /// The first string is stdout, the second is stderr.
-    StdoutAndStderr(String, String, Boolean),
+    StdoutAndStderr(String, String),
     /// Command completed successfully, but produced no output.
     NoOutput,
 }
@@ -42,18 +42,14 @@ impl CommandResult {
         }
         let output = self.output.clone();
         match output {
-            CommandOutput::Stdout(stdout, new_line) => {
+            CommandOutput::Stdout(stdout) => {
                 out.write_all(stdout.as_bytes()).unwrap();
-                if new_line {
-                    out.write_all(b"\n").unwrap();
-                }
+                out.write_all(b"\n").unwrap();
                 out.flush().unwrap();
             }
-            CommandOutput::StdoutAndStderr(stdout, _, new_line) => {
+            CommandOutput::StdoutAndStderr(stdout, _) => {
                 out.write_all(stdout.as_bytes()).unwrap();
-                if new_line {
-                    out.write_all(b"\n").unwrap();
-                }
+                out.write_all(b"\n").unwrap();
                 out.flush().unwrap();
             }
             _ => {}
@@ -66,18 +62,14 @@ impl CommandResult {
         }
         let output = self.output.clone();
         match output {
-            CommandOutput::Stderr(stderr, new_line) => {
+            CommandOutput::Stderr(stderr) => {
                 err.write_all(stderr.as_bytes()).unwrap();
-                if new_line {
-                    err.write_all(b"\n").unwrap();
-                }
+                err.write_all(b"\n").unwrap();
                 err.flush().unwrap();
             }
-            CommandOutput::StdoutAndStderr(_, stderr, new_line) => {
+            CommandOutput::StdoutAndStderr(_, stderr) => {
                 err.write_all(stderr.as_bytes()).unwrap();
-                if new_line {
-                    err.write_all(b"\n").unwrap();
-                }
+                err.write_all(b"\n").unwrap();
                 err.flush().unwrap();
             }
             _ => {}
@@ -103,10 +95,10 @@ fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) 
         Ok(process) => process,
         Err(e) => {
             return CommandResult {
-                output: CommandOutput::Stderr(
-                    format!("Failed to spawn command '{}': {}\n", cmd, e),
-                    true,
-                ),
+                output: CommandOutput::Stderr(format!(
+                    "Failed to spawn command '{}': {}\n",
+                    cmd, e
+                )),
                 exit_code: 1,
                 external: true,
             };
@@ -117,7 +109,7 @@ fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) 
         Ok(output) => output,
         Err(e) => {
             return CommandResult {
-                output: CommandOutput::Stderr(format!("Retrieving output error: {}\n", e), true),
+                output: CommandOutput::Stderr(format!("Retrieving output error: {}\n", e)),
                 exit_code: 1,
                 external: true,
             };
@@ -128,7 +120,7 @@ fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) 
         Ok(stdout) => stdout,
         Err(e) => {
             return CommandResult {
-                output: CommandOutput::Stderr(format!("Translating stdout error: {}\n", e), true),
+                output: CommandOutput::Stderr(format!("Translating stdout error: {}\n", e)),
                 exit_code: 1,
                 external: true,
             };
@@ -138,7 +130,7 @@ fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) 
         Ok(stderr) => stderr,
         Err(e) => {
             return CommandResult {
-                output: CommandOutput::Stderr(format!("Translating stderr error: {}\n", e), true),
+                output: CommandOutput::Stderr(format!("Translating stderr error: {}\n", e)),
                 exit_code: 1,
                 external: true,
             };
@@ -147,7 +139,7 @@ fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) 
     let status = output.status.code().unwrap_or_default();
 
     CommandResult {
-        output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
+        output: CommandOutput::StdoutAndStderr(stdout, stderr),
         exit_code: status,
         external: true,
     }
@@ -170,7 +162,7 @@ pub fn execute(
         process::exit(exit_code);
     } else if name == "echo" {
         return CommandResult {
-            output: CommandOutput::Stdout(format!("{}", args), false),
+            output: CommandOutput::Stdout(format!("{}", args)),
             exit_code: 0,
             external: false,
         };
@@ -185,7 +177,7 @@ pub fn execute(
             }
             Err(e) => {
                 return CommandResult {
-                    output: CommandOutput::Stderr(format!("Clearing screen error: {}", e), false),
+                    output: CommandOutput::Stderr(format!("Clearing screen error: {}", e)),
                     exit_code: 1,
                     external: false,
                 };
@@ -195,22 +187,19 @@ pub fn execute(
         let exe_name = args.get(0, "");
         if BUILTINS.contains(&exe_name) {
             return CommandResult {
-                output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name), false),
+                output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name)),
                 exit_code: 0,
                 external: false,
             };
         } else {
             match which(exe_name) {
                 Ok(path) => CommandResult {
-                    output: CommandOutput::Stdout(
-                        format!("{} is {}", exe_name, path.display()),
-                        false,
-                    ),
+                    output: CommandOutput::Stdout(format!("{} is {}", exe_name, path.display())),
                     exit_code: 0,
                     external: false,
                 },
                 Err(_) => CommandResult {
-                    output: CommandOutput::Stderr(format!("{}: not found", exe_name), false),
+                    output: CommandOutput::Stderr(format!("{}: not found", exe_name)),
                     exit_code: 1,
                     external: false,
                 },
@@ -218,15 +207,12 @@ pub fn execute(
         }
     } else if name == "pwd" {
         return CommandResult {
-            output: CommandOutput::Stdout(
-                format!(
-                    "{}",
-                    env::current_dir()
-                        .expect("Failed to get current working directory")
-                        .to_string_lossy()
-                ),
-                false,
-            ),
+            output: CommandOutput::Stdout(format!(
+                "{}",
+                env::current_dir()
+                    .expect("Failed to get current working directory")
+                    .to_string_lossy()
+            )),
             exit_code: 0,
             external: false,
         };
@@ -242,10 +228,10 @@ pub fn execute(
                 external: false,
             },
             Err(_) => CommandResult {
-                output: CommandOutput::Stderr(
-                    format!("cd: {}: No such file or directory", path.to_string_lossy()),
-                    false,
-                ),
+                output: CommandOutput::Stderr(format!(
+                    "cd: {}: No such file or directory",
+                    path.to_string_lossy()
+                )),
                 exit_code: 1,
                 external: false,
             },

@@ -1,5 +1,44 @@
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, StderrLock, StdinLock, StdoutLock, Write};
+use std::path::Path;
+
+pub fn open_file_create_dirs(path: impl AsRef<Path>, truncate: bool) -> io::Result<File> {
+    let path = path.as_ref();
+
+    // 1. Handle Relative vs. Absolute Paths:
+    //    `Path::canonicalize` attempts to resolve a path to an absolute path,
+    //     but returns an error if it doesn't exist. We skip this for now,
+    //     letting the `OpenOptions` create the directories as needed.
+    //     If you need a *guaranteed* absolute path, see the later discussion.
+
+    // 2. Create Parent Directories:
+    //    We need to ensure the parent directories exist *before* opening the file.
+    if let Some(parent_dir) = path.parent() {
+        // fs::create_dir_all creates the directory and any necessary parent directories.
+        // It's idempotent (doesn't error if the directory already exists).
+        std::fs::create_dir_all(parent_dir)?;
+    }
+
+    // 3. Open the File:
+    //    We use `OpenOptions` for maximum control over how the file is opened.
+    let mut open_options = OpenOptions::new();
+
+    //  Configure open options based on your needs:
+    //  - `read(true)`:  Opens the file for reading.
+    //  - `write(true)`:  Opens the file for writing.
+    //  - `create(true)`: Creates the file if it doesn't exist.
+    //  - `truncate(true)`: Truncates the file to zero length if it exists.
+    //  - `append(true)`: Opens the file in append mode.
+
+    open_options.read(true).write(true).create(true); // Read/Write access, create if missing
+
+    if truncate {
+        open_options.truncate(true); // Truncate if desired
+    }
+
+    //  Open the file, propagating any errors that occur.
+    open_options.open(path)
+}
 
 /// Enum representing a reader: either a file or stdin
 #[allow(dead_code)]
@@ -50,7 +89,7 @@ impl IO {
     #[allow(dead_code)]
     pub fn create_reader<'a>(path: Option<&str>) -> io::Result<Reader<'a>> {
         if let Some(path) = path {
-            let file = File::open(path)?;
+            let file = open_file_create_dirs(path, true)?;
             Ok(Reader::File(file))
         } else {
             let stdin = io::stdin();
@@ -61,7 +100,7 @@ impl IO {
     /// Create a writer to stdout, stderr, or a file
     pub fn create_writer<'a>(path: Option<&str>, error: bool) -> io::Result<Writer<'a>> {
         if let Some(path) = path {
-            let file = File::create(path)?;
+            let file = open_file_create_dirs(path, true)?;
             Ok(Writer::File(file))
         } else if error {
             let stderr = io::stderr();
