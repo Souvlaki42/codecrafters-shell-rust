@@ -86,21 +86,26 @@ impl CommandResult {
 // Ensure writers have `dyn Write` not the explicit types.
 fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) -> CommandResult {
     // Stdio config
+    // Create output
+    let mut command = Command::new(cmd);
+    // Check file config
     let stdout = match writers.0 {
         Writer::File(file) => Stdio::from(file.try_clone().unwrap()),
-        _ => Stdio::piped(), // Use a pipe for stdout
+        _ => Stdio::piped(),
     };
+
+    // Test for problems and panic
     let stderr = match writers.1 {
         Writer::File(file) => Stdio::from(file.try_clone().unwrap()),
-        _ => Stdio::piped(), // Use a pipe for stderr
+        _ => Stdio::piped(),
     };
 
-    // Set cmd
-    let mut command = Command::new(cmd);
-    command.stdout(stdout); // Set new stdout
-    command.stderr(stderr); // Set new stderr
+    // Set all parameters after testing output
+    command.stdout(stdout);
+    command.stderr(stderr);
     command.args(args);
 
+    // Message that we are starting the command.
     let process = match command.spawn() {
         Ok(process) => process,
         Err(e) => {
@@ -116,6 +121,7 @@ fn execute_external(cmd: &str, args: &Vec<String>, writers: (&Writer, &Writer)) 
         }
     };
 
+    // Get from command
     let output = match process.wait_with_output() {
         Ok(output) => output,
         Err(e) => {
@@ -174,93 +180,103 @@ pub fn execute(
     raw_args: Vec<String>,
     writers: (&Writer, &Writer),
 ) -> CommandResult {
-    if name.is_empty() {
-        CommandResult {
+    // Call external only.
+    if !BUILTINS.contains(&name.as_str()) {
+        // Todo: make sure external stdout has a new line at the end
+        return execute_external(&name, &raw_args, writers);
+    }
+
+    match name.as_str() {
+        "" => CommandResult {
             output: CommandOutput::NoOutput,
             exit_code: 0,
             external: false,
-        }
-    } else if name == "exit" {
-        let exit_code = args.get(0, 0);
-        process::exit(exit_code);
-    } else if name == "echo" {
-        return CommandResult {
-            output: CommandOutput::Stdout(format!("{}", args)),
-            exit_code: 0,
-            external: false,
-        };
-    } else if name == "clear" {
-        match clearscreen::clear() {
-            Ok(_) => {
-                return CommandResult {
-                    output: CommandOutput::NoOutput,
+        },
+        "exit" => {
+            let exit_code = args.get(0, 0);
+            process::exit(exit_code);
+        },
+        "echo" => {
+            CommandResult {
+                output: CommandOutput::Stdout(format!("{}", args)),
+                exit_code: 0,
+                external: false,
+            }
+        },
+        "clear" => {
+            match clearscreen::clear() {
+                Ok(_) => {
+                    CommandResult {
+                        output: CommandOutput::NoOutput,
+                        exit_code: 0,
+                        external: false,
+                    }
+                },
+                Err(e) => {
+                    CommandResult {
+                        output: CommandOutput::Stderr(format!("Clearing screen error: {}", e)),
+                        exit_code: 1,
+                        external: false,
+                    }
+                }
+            }
+        },
+        "type" => {
+            let exe_name = args.get(0, "");
+            if BUILTINS.contains(&exe_name) {
+                CommandResult {
+                    output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name)),
                     exit_code: 0,
                     external: false,
                 }
+            } else {
+                match which(exe_name) {
+                    Ok(path) => CommandResult {
+                        output: CommandOutput::Stdout(format!("{} is {}", exe_name, path.display())),
+                        exit_code: 0,
+                        external: false,
+                    },
+                    Err(_) => CommandResult {
+                        output: CommandOutput::Stderr(format!("{}: not found", exe_name)),
+                        exit_code: 1,
+                        external: false,
+                    },
+                }
             }
-            Err(e) => {
-                return CommandResult {
-                    output: CommandOutput::Stderr(format!("Clearing screen error: {}", e)),
-                    exit_code: 1,
-                    external: false,
-                };
-            }
-        }
-    } else if name == "type" {
-        let exe_name = args.get(0, "");
-        if BUILTINS.contains(&exe_name) {
-            return CommandResult {
-                output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name)),
+        },
+        "pwd" => {
+            CommandResult {
+                output: CommandOutput::Stdout(format!(
+                    "{}",
+                    env::current_dir()
+                        .expect("Failed to get current working directory")
+                        .to_string_lossy()
+                )),
                 exit_code: 0,
                 external: false,
-            };
-        } else {
-            match which(exe_name) {
-                Ok(path) => CommandResult {
-                    output: CommandOutput::Stdout(format!("{} is {}", exe_name, path.display())),
+            }
+        },
+        "cd" => {
+            // Todo: Use https://crates.io/crates/shellexpand
+            let home = std::env::var("HOME").expect("Home directory not found");
+            let path_string = args.get(0, "~").replace("~", &home);
+            let path = Path::new(&path_string);
+            match env::set_current_dir(path) {
+                Ok(_) => CommandResult {
+                    output: CommandOutput::NoOutput,
                     exit_code: 0,
                     external: false,
                 },
                 Err(_) => CommandResult {
-                    output: CommandOutput::Stderr(format!("{}: not found", exe_name)),
+                    output: CommandOutput::Stderr(format!(
+                        "cd: {}: No such file or directory\n",
+                        path.to_string_lossy()
+                    )),
                     exit_code: 1,
                     external: false,
                 },
             }
-        }
-    } else if name == "pwd" {
-        return CommandResult {
-            output: CommandOutput::Stdout(format!(
-                "{}",
-                env::current_dir()
-                    .expect("Failed to get current working directory")
-                    .to_string_lossy()
-            )),
-            exit_code: 0,
-            external: false,
-        };
-    } else if name == "cd" {
-        // Todo: Use https://crates.io/crates/shellexpand
-        let home = std::env::var("HOME").expect("Home directory not found");
-        let path_string = args.get(0, "~").replace("~", &home);
-        let path = Path::new(&path_string);
-        match env::set_current_dir(path) {
-            Ok(_) => CommandResult {
-                output: CommandOutput::NoOutput,
-                exit_code: 0,
-                external: false,
-            },
-            Err(_) => CommandResult {
-                output: CommandOutput::Stderr(format!(
-                    "cd: {}: No such file or directory\n",
-                    path.to_string_lossy()
-                )),
-                exit_code: 1,
-                external: false,
-            },
-        }
-    } else {
-        // Todo: make sure external stdout has a new line at the end
-        execute_external(&name, &raw_args, writers)
+        },
+        _ => unreachable!("A not possible type was send, check for internal problems. It's a check on our functions")
     }
 }

@@ -1,4 +1,4 @@
-use std::process;
+use std::{io::Write, process};
 
 use execution::execute;
 use io::IO;
@@ -55,5 +55,6 @@ fn main() {
                 result.to_error(&mut err);
             }
         }
+        std::io::stdout().flush().unwrap();
     }
 }
