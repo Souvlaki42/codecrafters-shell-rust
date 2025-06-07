@@ -122,7 +122,13 @@ fn execute_external(
     stderr: Stdio,
     stdin: Stdio,
 ) -> CommandResult {
-    // ===================== EXECUTE COMMAND =========================
+    if which(cmd).is_err() {
+        return CommandResult {
+            output: CommandOutput::Stderr(format!("{}: command not found\n", cmd), true),
+            exit_code: 127,
+        };
+    }
+
     let process = Command::new(cmd)
         .stdin(stdin)
         .stdout(stdout)
@@ -188,7 +194,6 @@ pub fn execute(
     append_output: bool,
     append_error: bool,
 ) -> CommandResult {
-    // ===================== INPUT REDIRECTION =========================
     let stdin = match input_file {
         Some(path_str) => {
             let input_path = PathBuf::from(path_str);
@@ -208,7 +213,6 @@ pub fn execute(
         None => Stdio::inherit(),
     };
 
-    // ===================== OUTPUT REDIRECTION =========================
     let stdout = match output_file {
         Some(path_str) => {
             let output_path = PathBuf::from(path_str);
@@ -228,7 +232,6 @@ pub fn execute(
         None => Stdio::inherit(),
     };
 
-    // ===================== ERROR REDIRECTION =========================
     let stderr = match error_file {
         Some(path_str) => {
             let error_path = PathBuf::from(path_str);
