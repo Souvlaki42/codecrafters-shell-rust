@@ -1,15 +1,6 @@
 use crate::strings;
-use std::io::{self, Write};
 
-pub fn get_input_tokenized() -> anyhow::Result<Vec<String>> {
-    io::stdout().flush()?;
-    print!("$ ");
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let input = input.trim_end_matches(&['\n', '\r'][..]);
-
+pub fn tokenize(input: &str) -> anyhow::Result<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current_token = String::new();
     let chars = input.chars().peekable();

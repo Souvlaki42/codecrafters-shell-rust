@@ -1,12 +1,13 @@
-use std::{io::Write, process};
+use std::{
+    io::{self, Write},
+    process,
+};
 
-use execution::execute;
-use io::IO;
-use token::get_input_tokenized;
+use execution::{execute, print_command_output};
 use value::Value;
 
+use crate::token::tokenize;
 mod execution;
-mod io;
 mod strings;
 mod token;
 mod value;
@@ -16,7 +17,15 @@ const REDIRECTIONS: [&str; 3] = [">", "1>", "2>"];
 // Todo: implement colored prompt based on last exit code
 fn main() {
     loop {
-        let tokens = get_input_tokenized().unwrap_or_else(|e| {
+        print!("$ ");
+        io::stdout().flush().expect("Failed to flush stdout");
+        let mut input = String::new();
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read the input");
+        let input = input.trim_end_matches(&['\n', '\r'][..]);
+
+        let tokens = tokenize(input).unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
         });
@@ -27,34 +36,43 @@ fn main() {
         let args = Value::from_iter(raw_args.clone());
 
         // Todo: handle unknown command messages when strings are empty
-        let redirection_position: Option<usize> = raw_args
+        let redirection_found = raw_args
             .iter()
             .position(|arg| REDIRECTIONS.contains(&arg.as_str()));
 
-        match redirection_position {
-            Some(position) if position + 1 < raw_args.len() => {
-                let redirection_file = raw_args[position + 1].to_string();
-                let mut out = IO::create_writer(Some(&redirection_file), false).unwrap();
-                let mut err = IO::create_writer(Some(&redirection_file), true).unwrap();
-                let redirection_type = raw_args[position].as_str();
-                let raw_args = raw_args[..position].to_vec();
-                let args = Value::from_iter(raw_args.clone());
-                let result = execute(name, args, raw_args, (&out, &err));
-
-                if redirection_type == "2>" {
-                    result.to_error(&mut err);
+        let result = match redirection_found {
+            Some(redirection_index) if redirection_index < raw_args.len() - 1 => {
+                let redirection_type = &raw_args[redirection_index];
+                let redirection_file = &raw_args[redirection_index + 1];
+                if redirection_type == ">" || redirection_type == "1>" {
+                    execute(
+                        name,
+                        args,
+                        raw_args.clone(),
+                        None,
+                        Some(redirection_file.as_str()),
+                        None,
+                        false,
+                        false,
+                    )
+                } else if redirection_type == "2>" {
+                    execute(
+                        name,
+                        args,
+                        raw_args.clone(),
+                        None,
+                        None,
+                        Some(redirection_file.as_str()),
+                        false,
+                        false,
+                    )
                 } else {
-                    result.to_output(&mut out);
+                    todo!("Other redirection type will be implemented at a later time!");
                 }
             }
-            _ => {
-                let mut out = IO::create_writer(None, false).unwrap();
-                let mut err = IO::create_writer(None, true).unwrap();
-                let result = execute(name, args, raw_args, (&out, &err));
-                result.to_output(&mut out);
-                result.to_error(&mut err);
-            }
-        }
-        std::io::stdout().flush().unwrap();
+            _ => execute(name, args, raw_args, None, None, None, false, false),
+        };
+
+        print_command_output(result);
     }
 }
