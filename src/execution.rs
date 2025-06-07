@@ -49,10 +49,13 @@ pub struct CommandResult {
     pub exit_code: Integer,
 }
 
-pub fn print_command_output(result: CommandResult) {
+pub fn print_command_output(result: CommandResult, skip_stdout: bool, skip_stderr: bool) {
     let CommandResult { output, .. } = result;
     match output {
         CommandOutput::Stdout(stdout, flush) => {
+            if skip_stdout {
+                return;
+            }
             if flush {
                 print!("{}", stdout);
                 io::stdout().flush().unwrap();
@@ -61,6 +64,9 @@ pub fn print_command_output(result: CommandResult) {
             }
         }
         CommandOutput::Stderr(stderr, flush) => {
+            if skip_stderr {
+                return;
+            }
             if flush {
                 eprint!("{}", stderr);
                 io::stderr().flush().unwrap();
@@ -70,13 +76,22 @@ pub fn print_command_output(result: CommandResult) {
         }
         CommandOutput::StdoutAndStderr(stdout, stderr, flush) => {
             if flush {
-                print!("{}", stdout);
-                io::stdout().flush().unwrap();
-                eprint!("{}", stderr);
-                io::stderr().flush().unwrap();
+                if !skip_stdout {
+                    print!("{}", stdout);
+                    io::stdout().flush().unwrap();
+                }
+
+                if !skip_stderr {
+                    eprint!("{}", stderr);
+                    io::stderr().flush().unwrap();
+                }
             } else {
-                println!("{}", stdout);
-                eprintln!("{}", stderr);
+                if !skip_stdout {
+                    println!("{}", stdout);
+                }
+                if !skip_stderr {
+                    eprintln!("{}", stderr);
+                }
             }
         }
         CommandOutput::NoOutput => {}
@@ -113,44 +128,8 @@ fn execute_external(
     };
 
     // ===================== OUTPUT REDIRECTION =========================
-    let stdout = match output_file {
-        Some(path_str) => {
-            let output_path = PathBuf::from(path_str);
-            match open_file_create_dirs(output_path, append_output) {
-                Ok(file) => Stdio::from(file),
-                Err(e) => {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to open output file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-        }
-        None => Stdio::inherit(),
-    };
-
-    // ===================== ERROR REDIRECTION =========================
-    let stderr = match error_file {
-        Some(path_str) => {
-            let error_path = PathBuf::from(path_str);
-            match open_file_create_dirs(error_path, append_error) {
-                Ok(file) => Stdio::from(file),
-                Err(e) => {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to open error file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-        }
-        None => Stdio::inherit(),
-    };
+    let stdout = Stdio::piped(); // Always pipe stdout
+    let stderr = Stdio::piped(); // Always pipe stderr
 
     // ===================== EXECUTE COMMAND =========================
     let process = Command::new(cmd)
@@ -183,7 +162,7 @@ fn execute_external(
         }
     };
 
-    let stdout = match String::from_utf8(output.stdout) {
+    let stdout_data = match String::from_utf8(output.stdout) {
         Ok(stdout) => stdout,
         Err(e) => {
             return CommandResult {
@@ -192,7 +171,7 @@ fn execute_external(
             };
         }
     };
-    let stderr = match String::from_utf8(output.stderr) {
+    let stderr_data = match String::from_utf8(output.stderr) {
         Ok(stderr) => stderr,
         Err(e) => {
             return CommandResult {
@@ -201,10 +180,64 @@ fn execute_external(
             };
         }
     };
+
+    // Handle redirection to file after successful execution
+    if let Some(path_str) = output_file {
+        let output_path = PathBuf::from(path_str);
+        match open_file_create_dirs(output_path, append_output) {
+            Ok(mut file) => {
+                if let Err(e) = write!(file, "{}", stdout_data) {
+                    return CommandResult {
+                        output: CommandOutput::Stderr(
+                            format!("Failed to write to output file: {}\n", e),
+                            true,
+                        ),
+                        exit_code: 1,
+                    };
+                }
+            }
+            Err(e) => {
+                return CommandResult {
+                    output: CommandOutput::Stderr(
+                        format!("Failed to open output file for writing: {}\n", e),
+                        true,
+                    ),
+                    exit_code: 1,
+                };
+            }
+        }
+    }
+
+    if let Some(path_str) = error_file {
+        let error_path = PathBuf::from(path_str);
+        match open_file_create_dirs(error_path, append_error) {
+            Ok(mut file) => {
+                if let Err(e) = write!(file, "{}", stderr_data) {
+                    return CommandResult {
+                        output: CommandOutput::Stderr(
+                            format!("Failed to write to error file: {}\n", e),
+                            true,
+                        ),
+                        exit_code: 1,
+                    };
+                }
+            }
+            Err(e) => {
+                return CommandResult {
+                    output: CommandOutput::Stderr(
+                        format!("Failed to open error file for writing: {}\n", e),
+                        true,
+                    ),
+                    exit_code: 1,
+                };
+            }
+        }
+    }
+
     let status = output.status.code().unwrap_or_default();
 
     CommandResult {
-        output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
+        output: CommandOutput::StdoutAndStderr(stdout_data, stderr_data, true),
         exit_code: status,
     }
 }
@@ -301,7 +334,6 @@ pub fn execute(
             },
         }
     } else {
-        // Todo: make sure external stdout has a new line at the end
         execute_external(
             &name,
             &args.to_vec(),
