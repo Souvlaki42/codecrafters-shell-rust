@@ -4,7 +4,6 @@ use std::{
 };
 
 use execution::{execute, print_command_output};
-use value::Value;
 
 use crate::token::tokenize;
 mod execution;
@@ -32,23 +31,21 @@ fn main() {
 
         let (first, rest) = tokens.split_first().expect("Command not found!");
         let name = first.to_string();
-        let raw_args = rest.to_vec();
-        let args = Value::from_iter(raw_args.clone());
+        let args = rest.to_vec();
 
         // Todo: handle unknown command messages when strings are empty
-        let redirection_found = raw_args
+        let redirection_found = args
             .iter()
             .position(|arg| REDIRECTIONS.contains(&arg.as_str()));
 
         let result = match redirection_found {
-            Some(redirection_index) if redirection_index < raw_args.len() - 1 => {
-                let redirection_type = &raw_args[redirection_index];
-                let redirection_file = &raw_args[redirection_index + 1];
+            Some(redirection_index) if redirection_index < args.len() - 1 => {
+                let redirection_type = &args[redirection_index];
+                let redirection_file = &args[redirection_index + 1];
                 if redirection_type == ">" || redirection_type == "1>" {
                     execute(
                         name,
-                        args,
-                        raw_args.clone(),
+                        &args[..redirection_index],
                         None,
                         Some(redirection_file.as_str()),
                         None,
@@ -58,8 +55,7 @@ fn main() {
                 } else if redirection_type == "2>" {
                     execute(
                         name,
-                        args,
-                        raw_args.clone(),
+                        &args[..redirection_index],
                         None,
                         None,
                         Some(redirection_file.as_str()),
@@ -70,7 +66,7 @@ fn main() {
                     todo!("Other redirection type will be implemented at a later time!");
                 }
             }
-            _ => execute(name, args, raw_args, None, None, None, false, false),
+            _ => execute(name, args.as_slice(), None, None, None, false, false),
         };
 
         print_command_output(result);

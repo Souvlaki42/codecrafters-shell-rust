@@ -209,29 +209,27 @@ fn execute_external(
     }
 }
 
-// todo: fix too many arguments
-#[allow(clippy::too_many_arguments)]
 pub fn execute(
     name: String,
-    args: Value,
-    raw_args: Vec<String>,
+    args: &[String],
     input_file: Option<&str>,
     output_file: Option<&str>,
     error_file: Option<&str>,
     append_output: bool,
     append_error: bool,
 ) -> CommandResult {
+    let value = Value::from_iter(args.to_vec());
     if name.is_empty() {
         CommandResult {
             output: CommandOutput::NoOutput,
             exit_code: 0,
         }
     } else if name == "exit" {
-        let exit_code = args.get(0, 0);
+        let exit_code = value.get(0, 0);
         process::exit(exit_code);
     } else if name == "echo" {
         return CommandResult {
-            output: CommandOutput::Stdout(format!("{}", args), false),
+            output: CommandOutput::Stdout(format!("{}", value), false),
             exit_code: 0,
         };
     } else if name == "clear" {
@@ -250,7 +248,7 @@ pub fn execute(
             }
         }
     } else if name == "type" {
-        let exe_name = args.get(0, "");
+        let exe_name = value.get(0, "");
         if BUILTINS.contains(&exe_name) {
             return CommandResult {
                 output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name), false),
@@ -287,7 +285,7 @@ pub fn execute(
     } else if name == "cd" {
         // Todo: Use https://crates.io/crates/shellexpand
         let home = std::env::var("HOME").expect("Home directory not found");
-        let path_string = args.get(0, "~").replace("~", &home);
+        let path_string = value.get(0, "~").replace("~", &home);
         let path = Path::new(&path_string);
         match env::set_current_dir(path) {
             Ok(_) => CommandResult {
@@ -306,7 +304,7 @@ pub fn execute(
         // Todo: make sure external stdout has a new line at the end
         execute_external(
             &name,
-            &raw_args,
+            &args.to_vec(),
             input_file,
             output_file,
             error_file,
