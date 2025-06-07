@@ -33,43 +33,35 @@ fn main() {
         let name = first.to_string();
         let args = rest.to_vec();
 
-        let mut redirection_path: Option<&str> = None;
+        let mut stdout_path: Option<&str> = None;
+        let mut stderr_path: Option<&str> = None;
 
-        // Todo: handle unknown command messages when strings are empty
-        let redirection_found = args
+        let result = if let Some(redirection_index) = args
             .iter()
-            .position(|arg| REDIRECTIONS.contains(&arg.as_str()));
+            .position(|arg| REDIRECTIONS.contains(&arg.as_str()))
+        {
+            let redirection_type = &args[redirection_index];
+            let path = args.get(redirection_index + 1).map(|s| s.as_str());
 
-        let result = match redirection_found {
-            Some(redirection_index) if redirection_index < args.len() - 1 => {
-                let redirection_type = &args[redirection_index];
-                redirection_path = Some(args[redirection_index + 1].as_str());
-                if redirection_type == ">" || redirection_type == "1>" {
-                    execute(
-                        name,
-                        &args[..redirection_index],
-                        None,
-                        redirection_path,
-                        None,
-                        false,
-                        false,
-                    )
-                } else if redirection_type == "2>" {
-                    execute(
-                        name,
-                        &args[..redirection_index],
-                        None,
-                        None,
-                        redirection_path,
-                        false,
-                        false,
-                    )
-                } else {
-                    todo!("Other redirection type will be implemented at a later time!");
-                }
+            match redirection_type.as_str() {
+                ">" | "1>" => stdout_path = path,
+                "2>" => stderr_path = path,
+                _ => todo!("Other redirection types"),
             }
-            _ => execute(name, args.as_slice(), None, None, None, false, false),
+            // Then execute with these paths:
+            execute(
+                name,
+                &args[..redirection_index],
+                None,
+                stdout_path,
+                stderr_path,
+                false,
+                false,
+            )
+        } else {
+            execute(name, args.as_slice(), None, None, None, false, false)
         };
-        result.send_output(redirection_path);
+
+        result.send_output(stdout_path, stderr_path);
     }
 }
