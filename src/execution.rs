@@ -1,7 +1,7 @@
 use std::{
     env,
     fs::{self, File, OpenOptions},
-    io::{self, Write},
+    io::{self, BufWriter, Write},
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
 };
@@ -49,88 +49,79 @@ pub struct CommandResult {
     pub exit_code: Integer,
 }
 
-pub fn print_command_output(result: CommandResult, skip_stdout: bool, skip_stderr: bool) {
-    let CommandResult { output, .. } = result;
-    match output {
-        CommandOutput::Stdout(stdout, flush) => {
-            if skip_stdout {
-                return;
-            }
-            if flush {
-                print!("{}", stdout);
-                io::stdout().flush().unwrap();
-            } else {
-                println!("{}", stdout);
-            }
-        }
-        CommandOutput::Stderr(stderr, flush) => {
-            if skip_stderr {
-                return;
-            }
-            if flush {
-                eprint!("{}", stderr);
-                io::stderr().flush().unwrap();
-            } else {
-                eprintln!("{}", stderr);
-            }
-        }
-        CommandOutput::StdoutAndStderr(stdout, stderr, flush) => {
-            if flush {
-                if !skip_stdout {
-                    print!("{}", stdout);
-                    io::stdout().flush().unwrap();
-                }
+impl CommandResult {
+    pub fn send_output(&self, path: Option<impl AsRef<Path>>) {
+        match &self.output {
+            CommandOutput::Stdout(stdout, flush) => {
+                let mut writer: BufWriter<Box<dyn Write>> = match path {
+                    Some(path) => BufWriter::new(Box::new(
+                        open_file_create_dirs(path, false).expect("Failed to open path"),
+                    )),
+                    None => BufWriter::new(Box::new(io::stdout().lock())),
+                };
 
-                if !skip_stderr {
-                    eprint!("{}", stderr);
-                    io::stderr().flush().unwrap();
-                }
-            } else {
-                if !skip_stdout {
-                    println!("{}", stdout);
-                }
-                if !skip_stderr {
-                    eprintln!("{}", stderr);
+                if *flush {
+                    write!(writer, "{}", stdout).expect("Failed to write stdout (flushed)");
+                    writer.flush().unwrap();
+                } else {
+                    writeln!(writer, "{}", stdout).expect("Failed to write stdout");
                 }
             }
+            CommandOutput::Stderr(stderr, flush) => {
+                let mut writer: BufWriter<Box<dyn Write>> = match path {
+                    Some(path) => BufWriter::new(Box::new(
+                        open_file_create_dirs(path, false).expect("Failed to open path"),
+                    )),
+                    None => BufWriter::new(Box::new(io::stderr().lock())),
+                };
+
+                if *flush {
+                    write!(writer, "{}", stderr).expect("Failed to write stderr (flushed)");
+                    writer.flush().unwrap();
+                } else {
+                    writeln!(writer, "{}", stderr).expect("Failed to write stderr");
+                }
+            }
+            CommandOutput::StdoutAndStderr(stdout, stderr, flush) => {
+                let mut out: BufWriter<Box<dyn Write>> = match &path {
+                    Some(path) => BufWriter::new(Box::new(
+                        open_file_create_dirs(path, false).expect("Failed to open output path"),
+                    )),
+                    None => BufWriter::new(Box::new(io::stdout().lock())),
+                };
+
+                if *flush {
+                    write!(out, "{}", stdout).expect("Failed to write stdout (flushed)");
+                    out.flush().unwrap();
+                } else {
+                    writeln!(out, "{}", stdout).expect("Failed to write stdout");
+                }
+                let mut err: BufWriter<Box<dyn Write>> = match &path {
+                    Some(path) => BufWriter::new(Box::new(
+                        open_file_create_dirs(path, false).expect("Failed to open error path"),
+                    )),
+                    None => BufWriter::new(Box::new(io::stderr().lock())),
+                };
+
+                if *flush {
+                    write!(err, "{}", stderr).expect("Failed to write stderr (flushed)");
+                    err.flush().unwrap();
+                } else {
+                    writeln!(err, "{}", stderr).expect("Failed to write stderr");
+                }
+            }
+            CommandOutput::NoOutput => {}
         }
-        CommandOutput::NoOutput => {}
     }
 }
 
 fn execute_external(
     cmd: &str,
     args: &Vec<String>,
-    input_file: Option<&str>,
-    output_file: Option<&str>,
-    error_file: Option<&str>,
-    append_output: bool,
-    append_error: bool,
+    stdout: Stdio,
+    stderr: Stdio,
+    stdin: Stdio,
 ) -> CommandResult {
-    // ===================== INPUT REDIRECTION =========================
-    let stdin = match input_file {
-        Some(path_str) => {
-            let input_path = PathBuf::from(path_str);
-            match File::open(input_path) {
-                Ok(file) => Stdio::from(file),
-                Err(e) => {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to open input file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-        }
-        None => Stdio::inherit(),
-    };
-
-    // ===================== OUTPUT REDIRECTION =========================
-    let stdout = Stdio::piped(); // Always pipe stdout
-    let stderr = Stdio::piped(); // Always pipe stderr
-
     // ===================== EXECUTE COMMAND =========================
     let process = Command::new(cmd)
         .stdin(stdin)
@@ -162,7 +153,7 @@ fn execute_external(
         }
     };
 
-    let stdout_data = match String::from_utf8(output.stdout) {
+    let stdout = match String::from_utf8(output.stdout) {
         Ok(stdout) => stdout,
         Err(e) => {
             return CommandResult {
@@ -171,7 +162,7 @@ fn execute_external(
             };
         }
     };
-    let stderr_data = match String::from_utf8(output.stderr) {
+    let stderr = match String::from_utf8(output.stderr) {
         Ok(stderr) => stderr,
         Err(e) => {
             return CommandResult {
@@ -180,64 +171,10 @@ fn execute_external(
             };
         }
     };
-
-    // Handle redirection to file after successful execution
-    if let Some(path_str) = output_file {
-        let output_path = PathBuf::from(path_str);
-        match open_file_create_dirs(output_path, append_output) {
-            Ok(mut file) => {
-                if let Err(e) = write!(file, "{}", stdout_data) {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to write to output file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-            Err(e) => {
-                return CommandResult {
-                    output: CommandOutput::Stderr(
-                        format!("Failed to open output file for writing: {}\n", e),
-                        true,
-                    ),
-                    exit_code: 1,
-                };
-            }
-        }
-    }
-
-    if let Some(path_str) = error_file {
-        let error_path = PathBuf::from(path_str);
-        match open_file_create_dirs(error_path, append_error) {
-            Ok(mut file) => {
-                if let Err(e) = write!(file, "{}", stderr_data) {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to write to error file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-            Err(e) => {
-                return CommandResult {
-                    output: CommandOutput::Stderr(
-                        format!("Failed to open error file for writing: {}\n", e),
-                        true,
-                    ),
-                    exit_code: 1,
-                };
-            }
-        }
-    }
-
     let status = output.status.code().unwrap_or_default();
 
     CommandResult {
-        output: CommandOutput::StdoutAndStderr(stdout_data, stderr_data, true),
+        output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
         exit_code: status,
     }
 }
@@ -251,6 +188,66 @@ pub fn execute(
     append_output: bool,
     append_error: bool,
 ) -> CommandResult {
+    // ===================== INPUT REDIRECTION =========================
+    let stdin = match input_file {
+        Some(path_str) => {
+            let input_path = PathBuf::from(path_str);
+            match File::open(input_path) {
+                Ok(file) => Stdio::from(file),
+                Err(e) => {
+                    return CommandResult {
+                        output: CommandOutput::Stderr(
+                            format!("Failed to open input file: {}\n", e),
+                            true,
+                        ),
+                        exit_code: 1,
+                    };
+                }
+            }
+        }
+        None => Stdio::inherit(),
+    };
+
+    // ===================== OUTPUT REDIRECTION =========================
+    let stdout = match output_file {
+        Some(path_str) => {
+            let output_path = PathBuf::from(path_str);
+            match open_file_create_dirs(output_path, append_output) {
+                Ok(file) => Stdio::from(file),
+                Err(e) => {
+                    return CommandResult {
+                        output: CommandOutput::Stderr(
+                            format!("Failed to open output file: {}\n", e),
+                            true,
+                        ),
+                        exit_code: 1,
+                    };
+                }
+            }
+        }
+        None => Stdio::inherit(),
+    };
+
+    // ===================== ERROR REDIRECTION =========================
+    let stderr = match error_file {
+        Some(path_str) => {
+            let error_path = PathBuf::from(path_str);
+            match open_file_create_dirs(error_path, append_error) {
+                Ok(file) => Stdio::from(file),
+                Err(e) => {
+                    return CommandResult {
+                        output: CommandOutput::Stderr(
+                            format!("Failed to open error file: {}\n", e),
+                            true,
+                        ),
+                        exit_code: 1,
+                    };
+                }
+            }
+        }
+        None => Stdio::inherit(),
+    };
+
     let value = Value::from_iter(args.to_vec());
     if name.is_empty() {
         CommandResult {
@@ -334,14 +331,7 @@ pub fn execute(
             },
         }
     } else {
-        execute_external(
-            &name,
-            &args.to_vec(),
-            input_file,
-            output_file,
-            error_file,
-            append_output,
-            append_error,
-        )
+        // Todo: make sure external stdout has a new line at the end
+        execute_external(&name, &args.to_vec(), stdout, stderr, stdin)
     }
 }

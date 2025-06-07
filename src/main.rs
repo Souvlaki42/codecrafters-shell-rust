@@ -3,7 +3,7 @@ use std::{
     process,
 };
 
-use execution::{execute, print_command_output};
+use execution::execute;
 
 use crate::token::tokenize;
 mod execution;
@@ -33,8 +33,7 @@ fn main() {
         let name = first.to_string();
         let args = rest.to_vec();
 
-        let mut skip_stdout = false;
-        let mut skip_stderr = false;
+        let mut redirection_path: Option<&str> = None;
 
         // Todo: handle unknown command messages when strings are empty
         let redirection_found = args
@@ -44,26 +43,24 @@ fn main() {
         let result = match redirection_found {
             Some(redirection_index) if redirection_index < args.len() - 1 => {
                 let redirection_type = &args[redirection_index];
-                let redirection_file = &args[redirection_index + 1];
+                redirection_path = Some(args[redirection_index + 1].as_str());
                 if redirection_type == ">" || redirection_type == "1>" {
-                    skip_stdout = true;
                     execute(
                         name,
                         &args[..redirection_index],
                         None,
-                        Some(redirection_file.as_str()),
+                        redirection_path,
                         None,
                         false,
                         false,
                     )
                 } else if redirection_type == "2>" {
-                    skip_stderr = true;
                     execute(
                         name,
                         &args[..redirection_index],
                         None,
                         None,
-                        Some(redirection_file.as_str()),
+                        redirection_path,
                         false,
                         false,
                     )
@@ -73,7 +70,6 @@ fn main() {
             }
             _ => execute(name, args.as_slice(), None, None, None, false, false),
         };
-
-        print_command_output(result, skip_stdout, skip_stderr);
+        result.send_output(redirection_path);
     }
 }
