@@ -54,12 +54,15 @@ impl CommandResult {
         &self,
         output_path: Option<impl AsRef<Path>>,
         error_path: Option<impl AsRef<Path>>,
+        append_output: bool,
+        append_error: bool,
     ) {
         match &self.output {
             CommandOutput::Stdout(stdout, flush) => {
                 if let Some(path) = output_path {
                     let mut writer = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, false).expect("Failed to open output file"),
+                        open_file_create_dirs(path, append_output)
+                            .expect("Failed to open output file"),
                     ));
                     if *flush {
                         write!(writer, "{}", stdout).expect("Failed to write stdout (flushed)");
@@ -81,7 +84,8 @@ impl CommandResult {
             CommandOutput::Stderr(stderr, flush) => {
                 if let Some(path) = error_path {
                     let mut writer = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, false).expect("Failed to open error file"),
+                        open_file_create_dirs(path, append_output)
+                            .expect("Failed to open error file"),
                     ));
                     if *flush {
                         write!(writer, "{}", stderr).expect("Failed to write stderr (flushed)");
@@ -104,7 +108,8 @@ impl CommandResult {
                 // Write stdout
                 if let Some(path) = output_path {
                     let mut out = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, false).expect("Failed to open output file"),
+                        open_file_create_dirs(path, append_output)
+                            .expect("Failed to open output file"),
                     ));
                     if *flush {
                         write!(out, "{}", stdout).expect("Failed to write stdout (flushed)");
@@ -124,7 +129,8 @@ impl CommandResult {
                 // Write stderr
                 if let Some(path) = error_path {
                     let mut err = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, false).expect("Failed to open error file"),
+                        open_file_create_dirs(path, append_error)
+                            .expect("Failed to open error file"),
                     ));
                     if *flush {
                         write!(err, "{}", stderr).expect("Failed to write stderr (flushed)");

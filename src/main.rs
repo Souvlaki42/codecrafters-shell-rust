@@ -11,7 +11,7 @@ mod strings;
 mod token;
 mod value;
 
-const REDIRECTIONS: [&str; 3] = [">", "1>", "2>"];
+const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
 
 // Todo: implement colored prompt based on last exit code
 fn main() {
@@ -36,16 +36,22 @@ fn main() {
         let mut stdout_path: Option<&str> = None;
         let mut stderr_path: Option<&str> = None;
 
+        let mut append_output = false;
+        let mut append_error = false;
+
         let result = if let Some(redirection_index) = args
             .iter()
             .position(|arg| REDIRECTIONS.contains(&arg.as_str()))
         {
-            let redirection_type = &args[redirection_index];
+            let redirection_type = &args[redirection_index].as_str();
             let path = args.get(redirection_index + 1).map(|s| s.as_str());
 
-            match redirection_type.as_str() {
-                ">" | "1>" => stdout_path = path,
-                "2>" => stderr_path = path,
+            append_output = *redirection_type == ">>" || *redirection_type == "1>>";
+            append_error = *redirection_type == "2>>";
+
+            match *redirection_type {
+                ">" | "1>" | ">>" | "1>>" => stdout_path = path,
+                "2>" | "2>>" => stderr_path = path,
                 _ => todo!("Other redirection types"),
             }
             // Then execute with these paths:
@@ -55,13 +61,21 @@ fn main() {
                 None,
                 stdout_path,
                 stderr_path,
-                false,
-                false,
+                append_output,
+                append_error,
             )
         } else {
-            execute(name, args.as_slice(), None, None, None, false, false)
+            execute(
+                name,
+                args.as_slice(),
+                None,
+                None,
+                None,
+                append_output,
+                append_error,
+            )
         };
 
-        result.send_output(stdout_path, stderr_path);
+        result.send_output(stdout_path, stderr_path, append_output, append_error);
     }
 }
