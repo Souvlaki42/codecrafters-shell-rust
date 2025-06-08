@@ -1,5 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use rustyline::{
     completion::{Completer, Pair},
     error::ReadlineError,
@@ -9,25 +7,19 @@ use rustyline::{
 
 use crate::{execution::BUILTINS, strings};
 
-#[derive(Helper, Hinter, Validator, Highlighter, Debug)]
+#[derive(Debug, Helper, Validator, Hinter, Highlighter)]
 pub struct ShellHelper {
-    external: Vec<String>,
-    builtin: Vec<String>,
-    first_tab: AtomicBool,
+    commands: Vec<String>,
 }
+
 impl ShellHelper {
-    pub fn new(path: &[String]) -> Self {
-        let external = path.to_vec();
-        let builtin = BUILTINS.iter().map(|s| s.to_string()).collect();
+    pub fn new(commands: Vec<String>) -> Self {
         Self {
-            external,
-            builtin,
-            first_tab: AtomicBool::new(true),
+            commands: [BUILTINS.iter().map(|s| s.to_string()).collect(), commands].concat(),
         }
     }
 }
 
-// Implement Completer
 impl Completer for ShellHelper {
     type Candidate = Pair;
 
@@ -36,12 +28,12 @@ impl Completer for ShellHelper {
         line: &str,
         pos: usize,
         _ctx: &Context<'_>,
-    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
+    ) -> Result<(usize, Vec<Self::Candidate>), ReadlineError> {
         let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
         let prefix = &line[start..pos].to_lowercase();
 
         let mut matches: Vec<Pair> = self
-            .builtin
+            .commands
             .iter()
             .filter(|cmd| cmd.to_lowercase().starts_with(prefix))
             .map(|cmd| Pair {
@@ -50,37 +42,7 @@ impl Completer for ShellHelper {
             })
             .collect();
 
-        // Append external commands that don't duplicate builtins
-        matches.extend(
-            self.external
-                .iter()
-                .filter(|cmd| cmd.to_lowercase().starts_with(prefix))
-                .map(|cmd| Pair {
-                    display: cmd.to_string(),
-                    replacement: cmd.to_string() + " ",
-                }),
-        );
-
         matches.sort_by(|a, b| a.display.cmp(&b.display));
-
-        if matches.len() > 1 {
-            if self.first_tab.load(Ordering::Relaxed) {
-                // First tab press: print bell character
-                println!("\x07"); // Bell character
-                self.first_tab.store(false, Ordering::Relaxed); // Set flag to false
-                return Ok((start, Vec::new())); // Return empty completions to prevent default behavior
-            } else {
-                // Subsequent tab press: print all matches
-                let display = matches
-                    .iter()
-                    .map(|pair| pair.display.clone())
-                    .collect::<Vec<String>>()
-                    .join("  ");
-                println!("{}", display);
-                // Reset first_tab for next completion sequence:
-                return Ok((start, Vec::new())); // prevent rustyline from doing any further completion
-            }
-        }
 
         Ok((start, matches))
     }
@@ -89,13 +51,7 @@ impl Completer for ShellHelper {
 pub fn get_input(rl: &mut Editor<ShellHelper, FileHistory>) -> Option<String> {
     let readline = rl.readline("$ ");
     match readline {
-        Ok(line) => {
-            if let Some(helper) = rl.helper() {
-                helper.first_tab.store(true, Ordering::Relaxed);
-            }
-
-            Some(line)
-        }
+        Ok(line) => Some(line),
         Err(ReadlineError::Interrupted) => {
             println!("CTRL-C");
             None
