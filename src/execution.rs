@@ -7,31 +7,33 @@ use std::{
     process::{self, Command, Stdio},
 };
 
-use which::which_all;
-
 use crate::value::{Boolean, Integer, Value};
 
-const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "clear"];
+// Todo: add more builtins like:
+// - clear (clearscreen crate)
+pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 
 pub fn get_external_executables() -> HashMap<String, String> {
     let mut path_executables: HashMap<String, String> = HashMap::new();
-    match which_all("") {
-        Ok(paths) => {
-            for p in paths {
-                let name = p.file_stem().map(|s| s.to_string_lossy().into_owned());
-                match name {
-                    Some(name) if !BUILTINS.contains(&name.as_str()) => {
-                        path_executables.insert(name, p.to_string_lossy().to_string());
-                    }
-                    _ => continue,
-                }
+
+    // Add everything we see on the PATH to the other_programs hashmap
+    let path = env::var("PATH").expect("Failed to fatch PATH!");
+    for dir in path.split(":") {
+        // Check if the directory exists
+        if !std::path::Path::new(dir).exists() {
+            continue;
+        }
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let path_str = path.to_str().unwrap();
+            let name = path.file_stem().unwrap().to_str().unwrap();
+            if path_executables.contains_key(name) || BUILTINS.contains(&name) {
+                continue;
             }
+            path_executables.insert(name.to_string(), path_str.to_string());
         }
-        Err(e) => {
-            eprintln!("Error getting executables: {}", e);
-            process::exit(1);
-        }
-    };
+    }
     path_executables
 }
 
@@ -334,21 +336,6 @@ pub fn execute(args: ExecuteArgs) -> CommandResult {
             output: CommandOutput::Stdout(format!("{}", value), false),
             exit_code: 0,
         };
-    } else if name == "clear" {
-        match clearscreen::clear() {
-            Ok(_) => {
-                return CommandResult {
-                    output: CommandOutput::NoOutput,
-                    exit_code: 0,
-                }
-            }
-            Err(e) => {
-                return CommandResult {
-                    output: CommandOutput::Stderr(format!("Clearing screen error: {}", e), false),
-                    exit_code: 1,
-                };
-            }
-        }
     } else if name == "type" {
         let exe_name = value.get(0, "");
         if BUILTINS.contains(&exe_name) {

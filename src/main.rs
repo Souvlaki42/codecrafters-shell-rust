@@ -1,17 +1,15 @@
-use std::{
-    io::{self, Write},
-    process,
-};
+use std::process;
 
 use execution::execute;
+use rustyline::Editor;
 
 use crate::{
     execution::{get_external_executables, ExecuteArgs},
-    token::tokenize,
+    input::{get_input, tokenize, ShellHelper},
 };
 mod execution;
+mod input;
 mod strings;
-mod token;
 mod value;
 
 const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
@@ -19,16 +17,19 @@ const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
 // Todo: implement colored prompt based on last exit code
 fn main() {
     let path_executables = get_external_executables();
-    loop {
-        print!("$ ");
-        io::stdout().flush().expect("Failed to flush stdout");
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .expect("Failed to read the input");
-        let input = input.trim_end_matches(&['\n', '\r'][..]);
+    let path_keys: Vec<String> = path_executables.keys().map(|k| k.to_string()).collect();
+    let shell_helper = ShellHelper::new(&path_keys);
 
-        let tokens = tokenize(input).unwrap_or_else(|e| {
+    let mut rl = Editor::new().expect("Failed to start the prompt!");
+    rl.set_helper(Some(shell_helper));
+    loop {
+        let input = get_input(&mut rl);
+
+        if input.is_none() {
+            continue;
+        }
+
+        let tokens = tokenize(&input.unwrap()).unwrap_or_else(|e| {
             eprintln!("Tokenizer failed: {}", e);
             process::exit(1);
         });
