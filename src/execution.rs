@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     env,
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Write},
@@ -6,11 +7,33 @@ use std::{
     process::{self, Command, Stdio},
 };
 
-use which::which;
+use which::which_all;
 
 use crate::value::{Boolean, Integer, Value};
 
 const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "clear"];
+
+pub fn get_external_executables() -> HashMap<String, String> {
+    let mut path_executables: HashMap<String, String> = HashMap::new();
+    match which_all("") {
+        Ok(paths) => {
+            for p in paths {
+                let name = p.file_stem().map(|s| s.to_string_lossy().into_owned());
+                match name {
+                    Some(name) if !BUILTINS.contains(&name.as_str()) => {
+                        path_executables.insert(name, p.to_string_lossy().to_string());
+                    }
+                    _ => continue,
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error getting executables: {}", e);
+            process::exit(1);
+        }
+    };
+    path_executables
+}
 
 pub fn open_file_create_dirs(path: impl AsRef<Path>, append: bool) -> io::Result<File> {
     let path = path.as_ref();
@@ -47,6 +70,18 @@ pub enum CommandOutput {
 pub struct CommandResult {
     pub output: CommandOutput,
     pub exit_code: Integer,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ExecuteArgs<'a> {
+    pub name: String,
+    pub args: &'a [String],
+    pub path: &'a HashMap<String, String>,
+    pub input_file: Option<&'a str>,
+    pub output_file: Option<&'a str>,
+    pub error_file: Option<&'a str>,
+    pub append_output: bool,
+    pub append_error: bool,
 }
 
 impl CommandResult {
@@ -160,13 +195,6 @@ fn execute_external(
     stderr: Stdio,
     stdin: Stdio,
 ) -> CommandResult {
-    if which(cmd).is_err() {
-        return CommandResult {
-            output: CommandOutput::Stderr(format!("{}: command not found\n", cmd), true),
-            exit_code: 127,
-        };
-    }
-
     let process = Command::new(cmd)
         .stdin(stdin)
         .stdout(stdout)
@@ -223,15 +251,18 @@ fn execute_external(
     }
 }
 
-pub fn execute(
-    name: String,
-    args: &[String],
-    input_file: Option<&str>,
-    output_file: Option<&str>,
-    error_file: Option<&str>,
-    append_output: bool,
-    append_error: bool,
-) -> CommandResult {
+pub fn execute(args: ExecuteArgs) -> CommandResult {
+    let ExecuteArgs {
+        name,
+        args,
+        path,
+        input_file,
+        output_file,
+        error_file,
+        append_output,
+        append_error,
+    } = args;
+
     let stdin = match input_file {
         Some(path_str) => {
             let input_path = PathBuf::from(path_str);
@@ -326,15 +357,12 @@ pub fn execute(
                 exit_code: 0,
             };
         } else {
-            match which(exe_name) {
-                Ok(path) => CommandResult {
-                    output: CommandOutput::Stdout(
-                        format!("{} is {}", exe_name, path.display()),
-                        false,
-                    ),
+            match path.get(exe_name) {
+                Some(path) => CommandResult {
+                    output: CommandOutput::Stdout(format!("{} is {}", exe_name, path), false),
                     exit_code: 0,
                 },
-                Err(_) => CommandResult {
+                None => CommandResult {
                     output: CommandOutput::Stderr(format!("{}: not found", exe_name), false),
                     exit_code: 1,
                 },
@@ -371,8 +399,12 @@ pub fn execute(
                 exit_code: 1,
             },
         }
+    } else if path.get(&name).is_none() {
+        return CommandResult {
+            output: CommandOutput::Stderr(format!("{}: command not found\n", name), true),
+            exit_code: 127,
+        };
     } else {
-        // Todo: make sure external stdout has a new line at the end
         execute_external(&name, &args.to_vec(), stdout, stderr, stdin)
     }
 }

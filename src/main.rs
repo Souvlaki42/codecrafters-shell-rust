@@ -5,7 +5,10 @@ use std::{
 
 use execution::execute;
 
-use crate::token::tokenize;
+use crate::{
+    execution::{get_external_executables, ExecuteArgs},
+    token::tokenize,
+};
 mod execution;
 mod strings;
 mod token;
@@ -15,6 +18,7 @@ const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
 
 // Todo: implement colored prompt based on last exit code
 fn main() {
+    let path_executables = get_external_executables();
     loop {
         print!("$ ");
         io::stdout().flush().expect("Failed to flush stdout");
@@ -55,25 +59,29 @@ fn main() {
                 _ => todo!("Other redirection types"),
             }
             // Then execute with these paths:
-            execute(
+            let args = ExecuteArgs {
                 name,
-                &args[..redirection_index],
-                None,
-                stdout_path,
-                stderr_path,
+                args: &args[..redirection_index],
+                path: &path_executables,
+                input_file: None,
+                output_file: stdout_path,
+                error_file: stderr_path,
                 append_output,
                 append_error,
-            )
+            };
+            execute(args)
         } else {
-            execute(
+            let args = ExecuteArgs {
                 name,
-                args.as_slice(),
-                None,
-                None,
-                None,
+                args: &args,
+                path: &path_executables,
+                input_file: None,
+                output_file: None,
+                error_file: None,
                 append_output,
                 append_error,
-            )
+            };
+            execute(args)
         };
 
         result.send_output(stdout_path, stderr_path, append_output, append_error);
