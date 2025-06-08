@@ -61,6 +61,8 @@ impl Completer for ShellHelper {
                 }),
         );
 
+        matches.sort_by(|a, b| a.display.cmp(&b.display));
+
         if matches.len() > 1 {
             if self.first_tab.load(Ordering::Relaxed) {
                 // First tab press: print bell character
