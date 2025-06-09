@@ -8,11 +8,11 @@ use rustyline::{
 use crate::{execution::BUILTINS, strings};
 
 #[derive(Debug, Helper, Validator, Hinter, Highlighter)]
-pub struct ShellHelper {
+pub struct Shell {
     commands: Vec<String>,
 }
 
-impl ShellHelper {
+impl Shell {
     pub fn new(commands: Vec<String>) -> Self {
         Self {
             commands: [BUILTINS.iter().map(|s| s.to_string()).collect(), commands].concat(),
@@ -20,7 +20,7 @@ impl ShellHelper {
     }
 }
 
-impl Completer for ShellHelper {
+impl Completer for Shell {
     type Candidate = Pair;
 
     fn complete(
@@ -48,8 +48,8 @@ impl Completer for ShellHelper {
     }
 }
 
-pub fn get_input(rl: &mut Editor<ShellHelper, FileHistory>) -> Option<String> {
-    let readline = rl.readline("$ ");
+pub fn get_input(rl: &mut Editor<Shell, FileHistory>, prompt: &str) -> Option<String> {
+    let readline = rl.readline(prompt);
     match readline {
         Ok(line) => Some(line),
         Err(ReadlineError::Interrupted) => {

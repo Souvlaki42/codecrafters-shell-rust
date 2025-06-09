@@ -5,7 +5,7 @@ use rustyline::{config::BellStyle, CompletionType, Config, Editor};
 
 use crate::{
     execution::{get_external_executables, ExecuteArgs},
-    input::{get_input, tokenize, ShellHelper},
+    input::{get_input, tokenize, Shell},
 };
 mod execution;
 mod input;
@@ -18,17 +18,17 @@ const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
 fn main() {
     let path_executables = get_external_executables();
     let path_keys: Vec<String> = path_executables.keys().map(|k| k.to_string()).collect();
-    let shell_helper = ShellHelper::new(path_keys);
+    let shell = Shell::new(path_keys);
 
     let rl_config = Config::builder()
         .bell_style(BellStyle::Audible)
         .completion_type(CompletionType::List)
         .build();
-
     let mut rl = Editor::with_config(rl_config).expect("Failed to start the prompt!");
-    rl.set_helper(Some(shell_helper));
+    rl.set_helper(Some(shell));
+
     loop {
-        let input = get_input(&mut rl);
+        let input = get_input(&mut rl, "$ ");
 
         if input.is_none() {
             continue;
