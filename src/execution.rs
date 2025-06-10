@@ -76,8 +76,7 @@ pub struct CommandResult {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExecuteArgs<'a> {
-    pub name: String,
-    pub args: &'a [String],
+    pub params: &'a [String],
     pub path: &'a HashMap<String, String>,
     pub input_file: Option<&'a str>,
     pub output_file: Option<&'a str>,
@@ -255,8 +254,7 @@ fn execute_external(
 
 pub fn execute(args: ExecuteArgs) -> CommandResult {
     let ExecuteArgs {
-        name,
-        args,
+        params,
         path,
         input_file,
         output_file,
@@ -321,6 +319,10 @@ pub fn execute(args: ExecuteArgs) -> CommandResult {
         }
         None => Stdio::inherit(),
     };
+
+    let (first, rest) = params.split_first().expect("Command not found!");
+    let name = first.to_string();
+    let args = rest.to_vec();
 
     let value = Value::from_iter(args.to_vec());
     if name.is_empty() {

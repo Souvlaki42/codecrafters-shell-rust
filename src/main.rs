@@ -39,56 +39,47 @@ fn main() {
             process::exit(1);
         });
 
-        let (first, rest) = tokens.split_first().expect("Command not found!");
-        let name = first.to_string();
-        let args = rest.to_vec();
-
         let mut stdout_path: Option<&str> = None;
         let mut stderr_path: Option<&str> = None;
 
         let mut append_output = false;
         let mut append_error = false;
 
-        let result = if let Some(redirection_index) = args
+        let mut params: &[String] = &tokens;
+
+        if let Some(redirection_index) = tokens
             .iter()
             .position(|arg| REDIRECTIONS.contains(&arg.as_str()))
+            .filter(|&idx| idx < tokens.len() - 1)
         {
-            let redirection_type = &args[redirection_index].as_str();
-            let path = args.get(redirection_index + 1).map(|s| s.as_str());
+            let redirection_type = tokens[redirection_index].as_str();
+            let path = tokens[redirection_index + 1].as_str();
 
-            append_output = *redirection_type == ">>" || *redirection_type == "1>>";
-            append_error = *redirection_type == "2>>";
+            (append_output, append_error) = match redirection_type {
+                ">>" | "1>>" => (true, false),
+                "2>>" => (false, true),
+                _ => (false, false),
+            };
 
-            match *redirection_type {
-                ">" | "1>" | ">>" | "1>>" => stdout_path = path,
-                "2>" | "2>>" => stderr_path = path,
+            match redirection_type {
+                ">" | "1>" | ">>" | "1>>" => stdout_path = Some(path),
+                "2>" | "2>>" => stderr_path = Some(path),
                 _ => todo!("Other redirection types"),
             }
-            // Then execute with these paths:
-            let args = ExecuteArgs {
-                name,
-                args: &args[..redirection_index],
-                path: &path_executables,
-                input_file: None,
-                output_file: stdout_path,
-                error_file: stderr_path,
-                append_output,
-                append_error,
-            };
-            execute(args)
-        } else {
-            let args = ExecuteArgs {
-                name,
-                args: &args,
-                path: &path_executables,
-                input_file: None,
-                output_file: None,
-                error_file: None,
-                append_output,
-                append_error,
-            };
-            execute(args)
+
+            params = &tokens[..redirection_index];
+        }
+
+        let args = ExecuteArgs {
+            params,
+            path: &path_executables,
+            input_file: None,
+            output_file: stdout_path,
+            error_file: stderr_path,
+            append_output,
+            append_error,
         };
+        let result = execute(args);
 
         result.send_output(stdout_path, stderr_path, append_output, append_error);
     }
