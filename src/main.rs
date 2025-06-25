@@ -1,4 +1,4 @@
-use std::process;
+use std::{io::pipe, process};
 
 use execution::execute;
 use rustyline::{config::BellStyle, CompletionType, Config, Editor};
@@ -71,14 +71,38 @@ fn main() {
             params = &tokens[..redirection_index];
         }
 
-        let args = ExecuteArgs {
+        if let Some(pipe_index) = tokens
+            .iter()
+            .position(|arg| arg == "|")
+            .filter(|&idx| idx < tokens.len() - 1)
+        {
+            let (pipe_rx, pipe_tx) = pipe().unwrap_or_else(|e| {
+                eprintln!("Faled to create pipe: {}", e);
+                process::exit(1);
+            });
+            let (pipe_in, mut pipe_out) = (IO::RPipe(Some(pipe_rx)), IO::WPipe(Some(pipe_tx)));
+
+            let (pre_params, post_params) = params.split_at(pipe_index);
+
+            execute(ExecuteArgs {
+                params: pre_params,
+                path: &path_executables,
+                stdin: &mut stdin,
+                stdout: &mut pipe_out,
+                stderr: &mut stderr,
+            });
+
+            stdin = pipe_in;
+            params = &post_params[1..];
+        }
+
+        let result = execute(ExecuteArgs {
             params,
             path: &path_executables,
             stdin: &mut stdin,
             stdout: &mut stdout,
             stderr: &mut stderr,
-        };
-        let result = execute(args);
+        });
 
         result.send_output(stdout, stderr);
     }
