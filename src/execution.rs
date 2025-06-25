@@ -3,11 +3,14 @@ use std::{
     env,
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Write},
-    path::{Path, PathBuf},
+    path::Path,
     process::{self, Command, Stdio},
 };
 
-use crate::value::{Boolean, Integer, Value};
+use crate::{
+    io::IO,
+    value::{Boolean, Integer, Value},
+};
 
 // Todo: add more builtins like:
 // - clear (clearscreen crate)
@@ -74,114 +77,51 @@ pub struct CommandResult {
     pub exit_code: Integer,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct ExecuteArgs<'a> {
     pub params: &'a [String],
     pub path: &'a HashMap<String, String>,
-    pub input_file: Option<&'a str>,
-    pub output_file: Option<&'a str>,
-    pub error_file: Option<&'a str>,
-    pub append_output: bool,
-    pub append_error: bool,
+    pub stdin: &'a mut IO,
+    pub stdout: &'a mut IO,
+    pub stderr: &'a mut IO,
 }
 
 impl CommandResult {
-    pub fn send_output(
-        &self,
-        output_path: Option<impl AsRef<Path>>,
-        error_path: Option<impl AsRef<Path>>,
-        append_output: bool,
-        append_error: bool,
-    ) {
+    pub fn send_output(&self, out_writer: IO, error_writer: IO) {
         match &self.output {
-            CommandOutput::Stdout(stdout, flush) => {
-                if let Some(path) = output_path {
-                    let mut writer = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, append_output)
-                            .expect("Failed to open output file"),
-                    ));
-                    if *flush {
-                        write!(writer, "{}", stdout).expect("Failed to write stdout (flushed)");
-                        writer.flush().unwrap();
-                    } else {
-                        writeln!(writer, "{}", stdout).expect("Failed to write stdout");
-                    }
+            CommandOutput::Stdout(output, flush) => {
+                let mut writer = BufWriter::from(out_writer);
+                if *flush {
+                    write!(writer, "{}", output).expect("Failed to write output (flushed)");
+                    writer.flush().unwrap();
                 } else {
-                    // Write to terminal stdout
-                    let mut writer = BufWriter::new(Box::new(io::stdout().lock()));
-                    if *flush {
-                        write!(writer, "{}", stdout).expect("Failed to write stdout (flushed)");
-                        writer.flush().unwrap();
-                    } else {
-                        writeln!(writer, "{}", stdout).expect("Failed to write stdout");
-                    }
+                    writeln!(writer, "{}", output).expect("Failed to write output");
                 }
             }
-            CommandOutput::Stderr(stderr, flush) => {
-                if let Some(path) = error_path {
-                    let mut writer = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, append_output)
-                            .expect("Failed to open error file"),
-                    ));
-                    if *flush {
-                        write!(writer, "{}", stderr).expect("Failed to write stderr (flushed)");
-                        writer.flush().unwrap();
-                    } else {
-                        writeln!(writer, "{}", stderr).expect("Failed to write stderr");
-                    }
+            CommandOutput::Stderr(error, flush) => {
+                let mut writer = BufWriter::from(error_writer);
+                if *flush {
+                    write!(writer, "{}", error).expect("Failed to write error (flushed)");
+                    writer.flush().unwrap();
                 } else {
-                    // Write to terminal stderr
-                    let mut writer = BufWriter::new(Box::new(io::stderr().lock()));
-                    if *flush {
-                        write!(writer, "{}", stderr).expect("Failed to write stderr (flushed)");
-                        writer.flush().unwrap();
-                    } else {
-                        writeln!(writer, "{}", stderr).expect("Failed to write stderr");
-                    }
+                    writeln!(writer, "{}", error).expect("Failed to write error");
                 }
             }
-            CommandOutput::StdoutAndStderr(stdout, stderr, flush) => {
-                // Write stdout
-                if let Some(path) = output_path {
-                    let mut out = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, append_output)
-                            .expect("Failed to open output file"),
-                    ));
-                    if *flush {
-                        write!(out, "{}", stdout).expect("Failed to write stdout (flushed)");
-                        out.flush().unwrap();
-                    } else {
-                        writeln!(out, "{}", stdout).expect("Failed to write stdout");
-                    }
+            CommandOutput::StdoutAndStderr(output, error, flush) => {
+                let mut out = BufWriter::from(out_writer);
+                let mut err = BufWriter::from(error_writer);
+                if *flush {
+                    write!(out, "{}", output).expect("Failed to write output (flushed)");
+                    out.flush().unwrap();
                 } else {
-                    let mut out = BufWriter::new(Box::new(io::stdout().lock()));
-                    if *flush {
-                        write!(out, "{}", stdout).expect("Failed to write stdout (flushed)");
-                        out.flush().unwrap();
-                    } else {
-                        writeln!(out, "{}", stdout).expect("Failed to write stdout");
-                    }
+                    writeln!(out, "{}", output).expect("Failed to write output");
                 }
-                // Write stderr
-                if let Some(path) = error_path {
-                    let mut err = BufWriter::new(Box::new(
-                        open_file_create_dirs(path, append_error)
-                            .expect("Failed to open error file"),
-                    ));
-                    if *flush {
-                        write!(err, "{}", stderr).expect("Failed to write stderr (flushed)");
-                        err.flush().unwrap();
-                    } else {
-                        writeln!(err, "{}", stderr).expect("Failed to write stderr");
-                    }
+
+                if *flush {
+                    write!(err, "{}", error).expect("Failed to write error (flushed)");
+                    err.flush().unwrap();
                 } else {
-                    let mut err = BufWriter::new(Box::new(io::stderr().lock()));
-                    if *flush {
-                        write!(err, "{}", stderr).expect("Failed to write stderr (flushed)");
-                        err.flush().unwrap();
-                    } else {
-                        writeln!(err, "{}", stderr).expect("Failed to write stderr");
-                    }
+                    writeln!(err, "{}", error).expect("Failed to write error");
                 }
             }
             CommandOutput::NoOutput => {}
@@ -256,69 +196,10 @@ pub fn execute(args: ExecuteArgs) -> CommandResult {
     let ExecuteArgs {
         params,
         path,
-        input_file,
-        output_file,
-        error_file,
-        append_output,
-        append_error,
+        stdin,
+        stdout,
+        stderr,
     } = args;
-
-    let stdin = match input_file {
-        Some(path_str) => {
-            let input_path = PathBuf::from(path_str);
-            match File::open(input_path) {
-                Ok(file) => Stdio::from(file),
-                Err(e) => {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to open input file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-        }
-        None => Stdio::inherit(),
-    };
-
-    let stdout = match output_file {
-        Some(path_str) => {
-            let output_path = PathBuf::from(path_str);
-            match open_file_create_dirs(output_path, append_output) {
-                Ok(file) => Stdio::from(file),
-                Err(e) => {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to open output file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-        }
-        None => Stdio::inherit(),
-    };
-
-    let stderr = match error_file {
-        Some(path_str) => {
-            let error_path = PathBuf::from(path_str);
-            match open_file_create_dirs(error_path, append_error) {
-                Ok(file) => Stdio::from(file),
-                Err(e) => {
-                    return CommandResult {
-                        output: CommandOutput::Stderr(
-                            format!("Failed to open error file: {}\n", e),
-                            true,
-                        ),
-                        exit_code: 1,
-                    };
-                }
-            }
-        }
-        None => Stdio::inherit(),
-    };
 
     let (first, rest) = params.split_first().expect("Command not found!");
     let name = first.to_string();
@@ -394,6 +275,12 @@ pub fn execute(args: ExecuteArgs) -> CommandResult {
             exit_code: 127,
         };
     } else {
-        execute_external(&name, &args.to_vec(), stdout, stderr, stdin)
+        execute_external(
+            &name,
+            &args.to_vec(),
+            stdout.into(),
+            stderr.into(),
+            stdin.into(),
+        )
     }
 }

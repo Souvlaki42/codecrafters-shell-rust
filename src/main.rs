@@ -6,9 +6,12 @@ use rustyline::{config::BellStyle, CompletionType, Config, Editor};
 use crate::{
     execution::{get_external_executables, ExecuteArgs},
     input::{get_input, tokenize, Shell},
+    io::IO,
 };
+
 mod execution;
 mod input;
+mod io;
 mod strings;
 mod value;
 
@@ -39,11 +42,9 @@ fn main() {
             process::exit(1);
         });
 
-        let mut stdout_path: Option<&str> = None;
-        let mut stderr_path: Option<&str> = None;
-
-        let mut append_output = false;
-        let mut append_error = false;
+        let mut stdin = IO::Stdin;
+        let mut stdout = IO::Stdout;
+        let mut stderr = IO::Stderr;
 
         let mut params: &[String] = &tokens;
 
@@ -53,19 +54,19 @@ fn main() {
             .filter(|&idx| idx < tokens.len() - 1)
         {
             let redirection_type = tokens[redirection_index].as_str();
-            let path = tokens[redirection_index + 1].as_str();
+            let path = &tokens[redirection_index + 1];
 
-            (append_output, append_error) = match redirection_type {
+            let (append_output, append_error) = match redirection_type {
                 ">>" | "1>>" => (true, false),
                 "2>>" => (false, true),
                 _ => (false, false),
             };
 
-            match redirection_type {
-                ">" | "1>" | ">>" | "1>>" => stdout_path = Some(path),
-                "2>" | "2>>" => stderr_path = Some(path),
+            (stdout, stderr) = match redirection_type {
+                ">" | "1>" | ">>" | "1>>" => (IO::File(path.to_string(), append_output), IO::Null),
+                "2>" | "2>>" => (IO::File(path.to_string(), append_error), IO::Null),
                 _ => todo!("Other redirection types"),
-            }
+            };
 
             params = &tokens[..redirection_index];
         }
@@ -73,14 +74,12 @@ fn main() {
         let args = ExecuteArgs {
             params,
             path: &path_executables,
-            input_file: None,
-            output_file: stdout_path,
-            error_file: stderr_path,
-            append_output,
-            append_error,
+            stdin: &mut stdin,
+            stdout: &mut stdout,
+            stderr: &mut stderr,
         };
         let result = execute(args);
 
-        result.send_output(stdout_path, stderr_path, append_output, append_error);
+        result.send_output(stdout, stderr);
     }
 }
