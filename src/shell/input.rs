@@ -5,7 +5,7 @@ use rustyline::{
     Context, Editor, Helper, Highlighter, Hinter, Validator,
 };
 
-use crate::{execution::BUILTINS, strings};
+use super::{execution::BUILTINS, strings};
 
 #[derive(Debug, Helper, Validator, Hinter, Highlighter)]
 pub struct Shell {

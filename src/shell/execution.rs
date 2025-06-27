@@ -7,8 +7,8 @@ use std::{
     process::{self, Command, Stdio},
 };
 
-use crate::{
-    io::IO,
+use super::{
+    rw::RW,
     value::{Boolean, Integer, Value},
 };
 
@@ -81,13 +81,13 @@ pub struct CommandResult {
 pub struct ExecuteArgs<'a> {
     pub params: &'a [String],
     pub path: &'a HashMap<String, String>,
-    pub stdin: &'a mut IO,
-    pub stdout: &'a mut IO,
-    pub stderr: &'a mut IO,
+    pub stdin: &'a mut RW,
+    pub stdout: &'a mut RW,
+    pub stderr: &'a mut RW,
 }
 
 impl CommandResult {
-    pub fn send_output(&self, out_writer: IO, error_writer: IO) {
+    pub fn send_output(&self, out_writer: RW, error_writer: RW) {
         match &self.output {
             CommandOutput::Stdout(output, flush) => {
                 let mut writer = BufWriter::from(out_writer);
@@ -192,15 +192,15 @@ fn execute_external(
     }
 }
 
-pub fn execute(args: ExecuteArgs) -> CommandResult {
-    let ExecuteArgs {
+pub fn execute(
+    ExecuteArgs {
         params,
         path,
         stdin,
         stdout,
         stderr,
-    } = args;
-
+    }: ExecuteArgs,
+) -> CommandResult {
     let (first, rest) = params.split_first().expect("Command not found!");
     let name = first.to_string();
     let args = rest.to_vec();

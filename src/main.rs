@@ -1,21 +1,16 @@
 use std::{io::pipe, process};
 
-use execution::execute;
 use rustyline::{config::BellStyle, CompletionType, Config, Editor};
 
-use crate::{
-    execution::{get_external_executables, ExecuteArgs},
+use shell::{
+    execution::{execute, get_external_executables, ExecuteArgs},
     input::{get_input, tokenize, Shell},
-    io::IO,
+    rw::RW,
 };
 
-mod execution;
-mod input;
-mod io;
-mod strings;
-mod value;
+use crate::shell::value::Redirection;
 
-const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
+mod shell;
 
 // Todo: implement colored prompt based on last exit code
 fn main() {
@@ -42,15 +37,15 @@ fn main() {
             process::exit(1);
         });
 
-        let mut stdin = IO::Stdin;
-        let mut stdout = IO::Stdout;
-        let mut stderr = IO::Stderr;
+        let mut stdin = RW::Stdin;
+        let mut stdout = RW::Stdout;
+        let mut stderr = RW::Stderr;
 
         let mut params: &[String] = &tokens;
 
         if let Some(redirection_index) = tokens
             .iter()
-            .position(|arg| REDIRECTIONS.contains(&arg.as_str()))
+            .position(|arg| arg.parse::<Redirection>().is_ok())
             .filter(|&idx| idx < tokens.len() - 1)
         {
             let redirection_type = tokens[redirection_index].as_str();
@@ -63,8 +58,8 @@ fn main() {
             };
 
             (stdout, stderr) = match redirection_type {
-                ">" | "1>" | ">>" | "1>>" => (IO::File(path.to_string(), append_output), IO::Null),
-                "2>" | "2>>" => (IO::File(path.to_string(), append_error), IO::Null),
+                ">" | "1>" | ">>" | "1>>" => (RW::File(path.to_string(), append_output), RW::Null),
+                "2>" | "2>>" => (RW::File(path.to_string(), append_error), RW::Null),
                 _ => todo!("Other redirection types"),
             };
 
@@ -80,7 +75,7 @@ fn main() {
                 eprintln!("Faled to create pipe: {}", e);
                 process::exit(1);
             });
-            let (pipe_in, mut pipe_out) = (IO::RPipe(Some(pipe_rx)), IO::WPipe(Some(pipe_tx)));
+            let (pipe_in, mut pipe_out) = (RW::RPipe(Some(pipe_rx)), RW::WPipe(Some(pipe_tx)));
 
             let (pre_params, post_params) = params.split_at(pipe_index);
 
