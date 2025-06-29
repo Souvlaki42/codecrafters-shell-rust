@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::{
     collections::HashMap,
     env,
@@ -12,32 +13,32 @@ use super::{
     value::{Boolean, Integer, Value},
 };
 
-// Todo: add more builtins like:
-// - clear (clearscreen crate)
 pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 
-pub fn get_external_executables() -> HashMap<String, String> {
-    let mut path_executables: HashMap<String, String> = HashMap::new();
+pub fn get_external_executables() -> (HashMap<String, String>, Vec<String>) {
+    env::var("PATH").ok().map_or_else(
+        || (HashMap::new(), Vec::new()),
+        |paths| {
+            let (keys, paths): (Vec<String>, Vec<String>) = env::split_paths(&paths)
+                .filter_map(|path| fs::read_dir(path).ok())
+                .flatten() // Stream of Result<DirEntry, _>
+                .filter_map(Result::ok) // Stream of DirEntry
+                .filter(|entry| entry.path().is_file())
+                .filter_map(|entry| {
+                    // This closure now only needs to extract the names and paths
+                    let path = entry.path();
+                    let name = path.file_stem()?.to_string_lossy().into_owned();
+                    let path_str = path.to_str()?.to_string();
+                    Some((name, path_str))
+                })
+                .filter(|(name, _)| !BUILTINS.contains(&name.as_str()))
+                .unique_by(|(name, _)| name.clone())
+                .unzip();
 
-    // Add everything we see on the PATH to the other_programs hashmap
-    let path = env::var("PATH").expect("Failed to fatch PATH!");
-    for dir in path.split(":") {
-        // Check if the directory exists
-        if !std::path::Path::new(dir).exists() {
-            continue;
-        }
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            let path_str = path.to_str().unwrap();
-            let name = path.file_stem().unwrap().to_str().unwrap();
-            if path_executables.contains_key(name) || BUILTINS.contains(&name) {
-                continue;
-            }
-            path_executables.insert(name.to_string(), path_str.to_string());
-        }
-    }
-    path_executables
+            let executables_map = keys.iter().cloned().zip(paths).collect();
+            (executables_map, keys)
+        },
+    )
 }
 
 pub fn open_file_create_dirs(path: impl AsRef<Path>, append: bool) -> io::Result<File> {
@@ -60,14 +61,9 @@ pub fn open_file_create_dirs(path: impl AsRef<Path>, append: bool) -> io::Result
 /// Define a custom enum for the function's outcome and if it should be flushed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum CommandOutput {
-    /// Command completed successfully, only stdout was produced.
     Stdout(String, Boolean),
-    /// Command completed successfully, only stderr was produced.
     Stderr(String, Boolean),
-    /// Command completed successfully, both stdout and stderr were produced.
-    /// The first string is stdout, the second is stderr.
     StdoutAndStderr(String, String, Boolean),
-    /// Command completed successfully, but produced no output.
     NoOutput,
 }
 
@@ -252,8 +248,7 @@ pub fn execute(
             exit_code: 0,
         };
     } else if name == "cd" {
-        // Todo: Use https://crates.io/crates/shellexpand
-        let home = std::env::var("HOME").expect("Home directory not found");
+        let home = env::var("HOME").expect("Home directory not found");
         let path_string = value.get(0, "~").replace("~", &home);
         let path = Path::new(&path_string);
         match env::set_current_dir(path) {
