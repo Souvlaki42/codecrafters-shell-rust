@@ -1,30 +1,13 @@
 use itertools::Itertools;
 use std::fmt;
-use strum::{Display, EnumString};
 
-use super::rw::RW;
 use super::strings::process_string;
 
 pub type Integer = i32;
 pub type Float = f32;
 pub type Boolean = bool;
 
-#[derive(Debug, Clone, PartialEq, Eq, Display, EnumString, Default)]
-pub enum Redirection {
-    #[default]
-    #[strum(serialize = ">")]
-    Default,
-    #[strum(serialize = ">>")]
-    DefaultAppend,
-    #[strum(serialize = "1>")]
-    Output,
-    #[strum(serialize = "1>>")]
-    OutputAppend,
-    #[strum(serialize = "2>")]
-    Error,
-    #[strum(serialize = "2>>")]
-    ErrorAppend,
-}
+pub const REDIRECTIONS: [&str; 6] = [">", "1>", "2>", ">>", "1>>", "2>>"];
 
 #[derive(Debug)]
 pub enum Value {
@@ -32,8 +15,6 @@ pub enum Value {
     Float(Float),
     String(String),
     Array(Vec<Value>),
-    Redirection(Box<Value>, Redirection, RW),
-    Pipe(Box<Value>, Box<Value>),
     Anything(String),
 }
 
@@ -46,12 +27,6 @@ impl fmt::Display for Value {
             Self::Anything(a) => write!(f, "{}", a),
             Self::Array(arr) => {
                 write!(f, "{}", arr.iter().map(|k| k.to_string()).join(" "))
-            }
-            Self::Redirection(boxed, redirection, io) => {
-                write!(f, "{} {} {:?}", *boxed, redirection, io)
-            }
-            Self::Pipe(pre_box, post_box) => {
-                write!(f, "{} | {}", *pre_box, *post_box)
             }
         }
     }

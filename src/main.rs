@@ -9,7 +9,7 @@ use shell::{
     value::tokenize,
 };
 
-use crate::shell::value::Redirection;
+use crate::shell::value::REDIRECTIONS;
 
 mod shell;
 
@@ -45,7 +45,7 @@ fn main() {
 
         if let Some(redirection_index) = tokens
             .iter()
-            .position(|arg| arg.parse::<Redirection>().is_ok())
+            .position(|arg| REDIRECTIONS.contains(&arg.as_str()))
             .filter(|&idx| idx < tokens.len() - 1)
         {
             let redirection_type = tokens[redirection_index].as_str();
