@@ -9,7 +9,10 @@ use shell::{
     value::tokenize,
 };
 
-use crate::shell::value::REDIRECTIONS;
+use crate::shell::{
+    execution::{finalize_executions, ExecutionOutput},
+    value::REDIRECTIONS,
+};
 
 mod shell;
 
@@ -42,6 +45,8 @@ fn main() {
         let mut stderr = RW::Stderr;
 
         let mut params: &[String] = &tokens;
+
+        let mut exec_ouputs = Vec::new();
 
         if let Some(redirection_index) = tokens
             .iter()
@@ -79,7 +84,7 @@ fn main() {
 
             let (pre_params, post_params) = params.split_at(pipe_index);
 
-            execute(ExecuteArgs {
+            let output = execute(ExecuteArgs {
                 params: pre_params,
                 path: &path_executables,
                 stdin: &mut stdin,
@@ -87,11 +92,13 @@ fn main() {
                 stderr: &mut stderr,
             });
 
+            exec_ouputs.push(output);
+
             stdin = pipe_in;
             params = &post_params[1..];
         }
 
-        let result = execute(ExecuteArgs {
+        let output = execute(ExecuteArgs {
             params,
             path: &path_executables,
             stdin: &mut stdin,
@@ -99,6 +106,9 @@ fn main() {
             stderr: &mut stderr,
         });
 
-        result.send_output(stdout, stderr);
+        exec_ouputs.push(output);
+
+        let final_output = finalize_executions(exec_ouputs);
+        final_output.write_output(stdout, stderr);
     }
 }

@@ -59,18 +59,34 @@ pub fn open_file_create_dirs(path: impl AsRef<Path>, append: bool) -> io::Result
 }
 
 /// Define a custom enum for the function's outcome and if it should be flushed.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Default)]
 pub enum CommandOutput {
     Stdout(String, Boolean),
     Stderr(String, Boolean),
     StdoutAndStderr(String, String, Boolean),
+    #[default]
     NoOutput,
+}
+
+#[derive(Debug)]
+pub enum ExecutionOutput {
+    Builtin(CommandResult),
+    External(process::Child),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CommandResult {
     pub output: CommandOutput,
     pub exit_code: Integer,
+}
+
+impl Default for ExecutionOutput {
+    fn default() -> Self {
+        Self::Builtin(CommandResult {
+            output: CommandOutput::NoOutput,
+            exit_code: 0,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -83,7 +99,7 @@ pub struct ExecuteArgs<'a> {
 }
 
 impl CommandResult {
-    pub fn send_output(&self, out_writer: RW, error_writer: RW) {
+    pub fn write_output(&self, out_writer: RW, error_writer: RW) {
         match &self.output {
             CommandOutput::Stdout(output, flush) => {
                 let mut writer = BufWriter::from(out_writer);
@@ -125,67 +141,63 @@ impl CommandResult {
     }
 }
 
-fn execute_external(
-    cmd: &str,
-    args: &Vec<String>,
-    stdout: Stdio,
-    stderr: Stdio,
-    stdin: Stdio,
-) -> CommandResult {
-    let process = Command::new(cmd)
-        .stdin(stdin)
-        .stdout(stdout)
-        .stderr(stderr)
-        .args(args)
-        .spawn();
-
-    let child = match process {
-        Ok(process) => process,
-        Err(e) => {
-            return CommandResult {
-                output: CommandOutput::Stderr(
-                    format!("Failed to spawn command '{}': {}\n", cmd, e),
-                    true,
-                ),
-                exit_code: 1,
-            };
-        }
-    };
-
-    let output = match child.wait_with_output() {
-        Ok(output) => output,
-        Err(e) => {
-            return CommandResult {
-                output: CommandOutput::Stderr(format!("Retrieving output error: {}\n", e), true),
-                exit_code: 1,
-            };
-        }
-    };
-
-    let stdout = match String::from_utf8(output.stdout) {
-        Ok(stdout) => stdout,
-        Err(e) => {
-            return CommandResult {
-                output: CommandOutput::Stderr(format!("Translating stdout error: {}\n", e), true),
-                exit_code: 1,
-            };
-        }
-    };
-    let stderr = match String::from_utf8(output.stderr) {
-        Ok(stderr) => stderr,
-        Err(e) => {
-            return CommandResult {
-                output: CommandOutput::Stderr(format!("Translating stderr error: {}\n", e), true),
-                exit_code: 1,
-            };
-        }
-    };
-    let status = output.status.code().unwrap_or_default();
-
-    CommandResult {
-        output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
-        exit_code: status,
+pub fn finalize_executions<T>(execs: T) -> CommandResult
+where
+    T: IntoIterator<Item = ExecutionOutput>,
+{
+    let mut iterator = execs.into_iter().peekable();
+    if iterator.peek().is_none() {
+        return CommandResult {
+            output: CommandOutput::NoOutput,
+            exit_code: 0,
+        };
     }
+
+    while let Some(exec) = iterator.next() {
+        if iterator.peek().is_none() {
+            return match exec {
+                ExecutionOutput::Builtin(output) => output,
+                ExecutionOutput::External(child) => {
+                    let output = match child.wait_with_output() {
+                        Ok(output) => output,
+                        Err(e) => {
+                            return CommandResult {
+                                output: CommandOutput::Stderr(
+                                    format!("Retrieving output error: {}\n", e),
+                                    true,
+                                ),
+                                exit_code: 1,
+                            };
+                        }
+                    };
+
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                    let status = output.status.code().unwrap_or_default();
+
+                    CommandResult {
+                        output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
+                        exit_code: status,
+                    }
+                }
+            };
+        }
+
+        if let ExecutionOutput::External(mut child) = exec {
+            if let Err(e) = child.wait() {
+                return CommandResult {
+                    output: CommandOutput::Stderr(
+                        format!("Error waiting for intermediate command: {}\n", e),
+                        true,
+                    ),
+                    exit_code: 1,
+                };
+            }
+        }
+        // If it was a Builtin, we do nothing and move to the next part of the pipe.
+    }
+
+    unreachable!("The loop will always return on the last item.");
 }
 
 pub fn execute(
@@ -196,46 +208,43 @@ pub fn execute(
         stdout,
         stderr,
     }: ExecuteArgs,
-) -> CommandResult {
+) -> ExecutionOutput {
     let (first, rest) = params.split_first().expect("Command not found!");
     let name = first.to_string();
     let args = rest.to_vec();
 
     let value = Value::from_iter(args.to_vec());
     if name.is_empty() {
-        CommandResult {
-            output: CommandOutput::NoOutput,
-            exit_code: 0,
-        }
+        ExecutionOutput::default()
     } else if name == "exit" {
         let exit_code = value.get(0, 0);
         process::exit(exit_code);
     } else if name == "echo" {
-        return CommandResult {
+        return ExecutionOutput::Builtin(CommandResult {
             output: CommandOutput::Stdout(format!("{}", value), false),
             exit_code: 0,
-        };
+        });
     } else if name == "type" {
         let exe_name = value.get(0, "");
         if BUILTINS.contains(&exe_name) {
-            return CommandResult {
+            return ExecutionOutput::Builtin(CommandResult {
                 output: CommandOutput::Stdout(format!("{} is a shell builtin", exe_name), false),
                 exit_code: 0,
-            };
+            });
         } else {
             match path.get(exe_name) {
-                Some(path) => CommandResult {
+                Some(path) => ExecutionOutput::Builtin(CommandResult {
                     output: CommandOutput::Stdout(format!("{} is {}", exe_name, path), false),
                     exit_code: 0,
-                },
-                None => CommandResult {
+                }),
+                None => ExecutionOutput::Builtin(CommandResult {
                     output: CommandOutput::Stderr(format!("{}: not found", exe_name), false),
                     exit_code: 1,
-                },
+                }),
             }
         }
     } else if name == "pwd" {
-        return CommandResult {
+        return ExecutionOutput::Builtin(CommandResult {
             output: CommandOutput::Stdout(
                 format!(
                     "{}",
@@ -246,36 +255,50 @@ pub fn execute(
                 false,
             ),
             exit_code: 0,
-        };
+        });
     } else if name == "cd" {
         let home = env::var("HOME").expect("Home directory not found");
         let path_string = value.get(0, "~").replace("~", &home);
         let path = Path::new(&path_string);
         match env::set_current_dir(path) {
-            Ok(_) => CommandResult {
+            Ok(_) => ExecutionOutput::Builtin(CommandResult {
                 output: CommandOutput::NoOutput,
                 exit_code: 0,
-            },
-            Err(_) => CommandResult {
+            }),
+            Err(_) => ExecutionOutput::Builtin(CommandResult {
                 output: CommandOutput::Stderr(
                     format!("cd: {}: No such file or directory", path.to_string_lossy()),
                     false,
                 ),
                 exit_code: 1,
-            },
+            }),
         }
     } else if path.get(&name).is_none() {
-        return CommandResult {
+        return ExecutionOutput::Builtin(CommandResult {
             output: CommandOutput::Stderr(format!("{}: command not found\n", name), true),
             exit_code: 127,
-        };
+        });
     } else {
-        execute_external(
-            &name,
-            &args.to_vec(),
-            stdout.into(),
-            stderr.into(),
-            stdin.into(),
-        )
+        let process = Command::new(&name)
+            .stdin(stdin)
+            .stdout(stdout)
+            .stderr(stderr)
+            .args(args)
+            .spawn();
+
+        let child = match process {
+            Ok(process) => process,
+            Err(e) => {
+                return ExecutionOutput::Builtin(CommandResult {
+                    output: CommandOutput::Stderr(
+                        format!("Failed to spawn command '{}': {}\n", &name, e),
+                        true,
+                    ),
+                    exit_code: 1,
+                });
+            }
+        };
+
+        ExecutionOutput::External(child)
     }
 }
