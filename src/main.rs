@@ -9,10 +9,7 @@ use shell::{
     value::tokenize,
 };
 
-use crate::shell::{
-    execution::{finalize_executions, ExecutionOutput},
-    value::REDIRECTIONS,
-};
+use crate::shell::{execution::finalize_executions, value::REDIRECTIONS};
 
 mod shell;
 
@@ -62,9 +59,13 @@ fn main() {
                 _ => (false, false),
             };
 
-            (stdout, stderr) = match redirection_type {
-                ">" | "1>" | ">>" | "1>>" => (RW::File(path.to_string(), append_output), RW::Null),
-                "2>" | "2>>" => (RW::File(path.to_string(), append_error), RW::Null),
+            match redirection_type {
+                ">" | "1>" | ">>" | "1>>" => {
+                    stdout = RW::File(path.to_string(), append_output);
+                }
+                "2>" | "2>>" => {
+                    stderr = RW::File(path.to_string(), append_error);
+                }
                 _ => todo!("Other redirection types"),
             };
 

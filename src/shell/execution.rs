@@ -1,11 +1,10 @@
-use itertools::Itertools;
 use std::{
     collections::HashMap,
-    env,
+    env::{self, split_paths},
     fs::{self, File, OpenOptions},
     io::{self, BufWriter, Write},
     path::Path,
-    process::{self, Command, Stdio},
+    process::{self, Command},
 };
 
 use super::{
@@ -16,29 +15,27 @@ use super::{
 pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 
 pub fn get_external_executables() -> (HashMap<String, String>, Vec<String>) {
-    env::var("PATH").ok().map_or_else(
-        || (HashMap::new(), Vec::new()),
-        |paths| {
-            let (keys, paths): (Vec<String>, Vec<String>) = env::split_paths(&paths)
-                .filter_map(|path| fs::read_dir(path).ok())
-                .flatten() // Stream of Result<DirEntry, _>
-                .filter_map(Result::ok) // Stream of DirEntry
-                .filter(|entry| entry.path().is_file())
-                .filter_map(|entry| {
-                    // This closure now only needs to extract the names and paths
-                    let path = entry.path();
-                    let name = path.file_stem()?.to_string_lossy().into_owned();
-                    let path_str = path.to_str()?.to_string();
-                    Some((name, path_str))
-                })
-                .filter(|(name, _)| !BUILTINS.contains(&name.as_str()))
-                .unique_by(|(name, _)| name.clone())
-                .unzip();
+    let mut path_executables = HashMap::new();
 
-            let executables_map = keys.iter().cloned().zip(paths).collect();
-            (executables_map, keys)
-        },
-    )
+    let path = env::var("PATH").expect("Failed to fatch PATH!");
+    for dir in split_paths(&path) {
+        if !dir.exists() {
+            continue;
+        }
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            let path_str = path.to_str().unwrap();
+            let name = path.file_stem().unwrap().to_str().unwrap();
+            if path_executables.contains_key(name) || BUILTINS.contains(&name) {
+                continue;
+            }
+            path_executables.insert(name.to_string(), path_str.to_string());
+        }
+    }
+
+    let path_keys = path_executables.keys().map(|k| k.to_string()).collect();
+    (path_executables, path_keys)
 }
 
 pub fn open_file_create_dirs(path: impl AsRef<Path>, append: bool) -> io::Result<File> {

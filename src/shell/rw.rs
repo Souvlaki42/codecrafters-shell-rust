@@ -26,14 +26,13 @@ impl From<&mut RW> for Stdio {
                 let path = PathBuf::from(file_path.clone());
                 match open_file_create_dirs(path, *append) {
                     Ok(file) => Stdio::from(file),
-                    Err(_) => Stdio::inherit(),
+                    Err(_) => Stdio::piped(),
                 }
             }
-            RW::Pipe => Stdio::piped(),
             RW::Null => Stdio::null(),
             RW::RPipe(ref mut pipe) => Stdio::from(pipe.take().expect("PipeReader already taken")),
             RW::WPipe(ref mut pipe) => Stdio::from(pipe.take().expect("PipeWriter already taken")),
-            _ => Stdio::inherit(),
+            _ => Stdio::piped(),
         }
     }
 }
