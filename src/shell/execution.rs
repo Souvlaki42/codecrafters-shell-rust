@@ -138,63 +138,42 @@ impl CommandResult {
     }
 }
 
-pub fn finalize_executions<T>(execs: T) -> CommandResult
-where
-    T: IntoIterator<Item = ExecutionOutput>,
-{
-    let mut iterator = execs.into_iter().peekable();
-    if iterator.peek().is_none() {
-        return CommandResult {
-            output: CommandOutput::NoOutput,
-            exit_code: 0,
-        };
-    }
-
-    while let Some(exec) = iterator.next() {
-        if iterator.peek().is_none() {
-            return match exec {
-                ExecutionOutput::Builtin(output) => output,
-                ExecutionOutput::External(child) => {
-                    let output = match child.wait_with_output() {
-                        Ok(output) => output,
-                        Err(e) => {
-                            return CommandResult {
-                                output: CommandOutput::Stderr(
-                                    format!("Retrieving output error: {}\n", e),
-                                    true,
-                                ),
-                                exit_code: 1,
-                            };
-                        }
-                    };
-
-                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                    let status = output.status.code().unwrap_or_default();
-
-                    CommandResult {
-                        output: CommandOutput::StdoutAndStderr(stdout, stderr, true),
-                        exit_code: status,
+pub fn finalize_executions(execs: Vec<ExecutionOutput>) -> CommandResult {
+    let mut last_result = None;
+    for exec in execs {
+        match exec {
+            ExecutionOutput::Builtin(output) => {
+                last_result = Some(output);
+            }
+            ExecutionOutput::External(child) => {
+                let output = match child.wait_with_output() {
+                    Ok(output) => output,
+                    Err(e) => {
+                        return CommandResult {
+                            output: CommandOutput::Stderr(
+                                format!("Retrieving output error: {}\n", e),
+                                true,
+                            ),
+                            exit_code: 1,
+                        };
                     }
-                }
-            };
-        }
-
-        if let ExecutionOutput::External(mut child) = exec {
-            if let Err(e) = child.wait() {
-                return CommandResult {
-                    output: CommandOutput::Stderr(
-                        format!("Error waiting for intermediate command: {}\n", e),
+                };
+                // Save the last output for returning
+                last_result = Some(CommandResult {
+                    output: CommandOutput::StdoutAndStderr(
+                        String::from_utf8_lossy(&output.stdout).to_string(),
+                        String::from_utf8_lossy(&output.stderr).to_string(),
                         true,
                     ),
-                    exit_code: 1,
-                };
+                    exit_code: output.status.code().unwrap_or_default(),
+                });
             }
         }
-        // If it was a Builtin, we do nothing and move to the next part of the pipe.
     }
-
-    unreachable!("The loop will always return on the last item.");
+    last_result.unwrap_or(CommandResult {
+        output: CommandOutput::NoOutput,
+        exit_code: 0,
+    })
 }
 
 pub fn execute(

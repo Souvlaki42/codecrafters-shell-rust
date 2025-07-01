@@ -81,22 +81,37 @@ fn main() {
                 eprintln!("Faled to create pipe: {}", e);
                 process::exit(1);
             });
-            let (pipe_in, mut pipe_out) = (RW::RPipe(Some(pipe_rx)), RW::WPipe(Some(pipe_tx)));
-
             let (pre_params, post_params) = params.split_at(pipe_index);
 
-            let output = execute(ExecuteArgs {
+            let mut left_stdin = stdin;
+            let mut left_stdout = RW::WPipe(Some(pipe_tx));
+            let mut left_stderr = RW::Stderr;
+            let left_exec = execute(ExecuteArgs {
                 params: pre_params,
                 path: &path_executables,
-                stdin: &mut stdin,
-                stdout: &mut pipe_out,
-                stderr: &mut stderr,
+                stdin: &mut left_stdin,
+                stdout: &mut left_stdout,
+                stderr: &mut left_stderr,
             });
 
-            exec_ouputs.push(output);
+            let mut right_stdin = RW::RPipe(Some(pipe_rx));
+            let mut right_stdout = RW::Stdout;
+            let mut right_stderr = RW::Stderr;
+            let right_exec = execute(ExecuteArgs {
+                params: &post_params[1..],
+                path: &path_executables,
+                stdin: &mut right_stdin,
+                stdout: &mut right_stdout,
+                stderr: &mut right_stderr,
+            });
 
-            stdin = pipe_in;
-            params = &post_params[1..];
+            exec_ouputs.push(left_exec);
+            exec_ouputs.push(right_exec);
+
+            let final_output = finalize_executions(exec_ouputs);
+            dbg!(&final_output);
+            final_output.write_output(RW::Stdout, RW::Stderr);
+            continue;
         }
 
         let output = execute(ExecuteArgs {
@@ -110,6 +125,7 @@ fn main() {
         exec_ouputs.push(output);
 
         let final_output = finalize_executions(exec_ouputs);
+        dbg!(&final_output);
         final_output.write_output(stdout, stderr);
     }
 }
