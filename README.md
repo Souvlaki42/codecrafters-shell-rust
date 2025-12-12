@@ -1,35 +1,20 @@
-[![progress-banner](https://backend.codecrafters.io/progress/shell/05de749e-a647-46fa-b3c8-a1bddb74d058)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Codecrafters Shell Challenge in Rust
 
-This is a starting point for Rust solutions to the
-["Build Your Own Shell" Challenge](https://app.codecrafters.io/courses/shell/overview).
+This is my latest attempt at writing a simple shell in Rust, following Codecrafters.
 
-In this challenge, you'll build your own POSIX compliant shell that's capable of
-interpreting shell commands, running external programs and builtin commands like
-cd, pwd, echo and more. Along the way, you'll learn about shell command parsing,
-REPLs, builtin commands, and more.
+If you want to learn more, go here: https://app.codecrafters.io/courses/shell/overview
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+## Usage
 
-# Passing the first stage
+Just clone the repository and run `cargo run --release`.
 
-The entry point for your `shell` implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+## Progress
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+At the time of writing this, I'm stuck at stage #BR6 - `Dual-command pipeline`.
 
-Time to move on to the next stage!
+## License
 
-# Stage 2 & beyond
+This project is licensed under The Unlicense,
+which means it is public domain and you can do whatever you want with it.
 
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `cargo (1.87)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+I don't recommend using it though, for (hopefully) obvious reasons.
