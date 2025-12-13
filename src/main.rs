@@ -13,16 +13,18 @@ use crate::shell::{execution::finalize_executions, value::REDIRECTIONS};
 
 mod shell;
 
-// Todo: implement colored prompt based on last exit code
 fn main() {
     let (path_executables, path_keys) = get_external_executables();
+
     let prompt = Prompt::new(path_keys);
 
     let rl_config = Config::builder()
         .bell_style(BellStyle::Audible)
         .completion_type(CompletionType::List)
         .build();
+
     let mut rl = Editor::with_config(rl_config).expect("Failed to start the prompt!");
+
     rl.set_helper(Some(prompt));
 
     loop {
