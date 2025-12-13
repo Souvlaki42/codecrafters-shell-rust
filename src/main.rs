@@ -111,7 +111,6 @@ fn main() {
             exec_ouputs.push(right_exec);
 
             let final_output = finalize_executions(exec_ouputs);
-            dbg!(&final_output);
             final_output.write_output(RW::Stdout, RW::Stderr);
             continue;
         }
@@ -127,7 +126,6 @@ fn main() {
         exec_ouputs.push(output);
 
         let final_output = finalize_executions(exec_ouputs);
-        dbg!(&final_output);
         final_output.write_output(stdout, stderr);
     }
 }
