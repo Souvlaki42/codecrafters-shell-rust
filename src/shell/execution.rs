@@ -8,8 +8,8 @@ use std::{
 };
 
 use super::{
+    lexer::{Boolean, Integer, Token},
     rw::RW,
-    value::{Boolean, Integer, Value},
 };
 
 pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
@@ -189,7 +189,7 @@ pub fn execute(
     let name = first.to_string();
     let args = rest.to_vec();
 
-    let value = Value::from_iter(args.to_vec());
+    let value = Token::from_iter(args.to_vec());
     if name.is_empty() {
         ExecutionOutput::default()
     } else if name == "exit" {
