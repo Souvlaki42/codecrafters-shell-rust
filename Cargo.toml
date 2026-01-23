@@ -8,7 +8,7 @@ rust-version = "1.87"
 [dependencies]
 anyhow = "1.0.100"                                         # error handling
 bytes = "1.11.0"                                           # helps manage buffers
-thiserror = "2.0.17"                                      # error handling
+thiserror = "2.0.18"                                      # error handling
 
 itertools = "0.14.0"
 rustyline = { version = "17.0.2", features = ["derive"] }
