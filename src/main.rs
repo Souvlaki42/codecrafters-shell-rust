@@ -1,7 +1,6 @@
 use std::{
     collections::HashMap,
     env::{self, split_paths},
-    ffi::OsStr,
     fs::{self, OpenOptions},
     io::{self, Write},
     os::unix::fs::PermissionsExt,
@@ -95,10 +94,7 @@ fn get_external_executables() -> HashMap<String, PathBuf> {
             }
 
             if let Some(file_name) = path.file_name().map(|f| f.to_string_lossy().to_string()) {
-                let existing = results.entry(file_name.clone()).or_insert(path.clone());
-                if !existing.iter().contains(OsStr::new("/usr")) && *existing != path {
-                    results.insert(file_name, path);
-                }
+                results.entry(file_name.clone()).or_insert(path);
             }
         }
     }
