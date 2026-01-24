@@ -297,7 +297,7 @@ fn handle_external(cmd: &str, args: Vec<String>) -> Response {
         };
     };
 
-    let result = match Command::new(executable).args(args).output() {
+    let result = match Command::new(cmd).args(args).output() {
         Ok(output) => output,
         Err(err) => {
             return Response {
