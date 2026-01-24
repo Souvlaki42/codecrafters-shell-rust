@@ -30,8 +30,8 @@ impl From<&mut RW> for Stdio {
                 }
             }
             RW::Null => Stdio::null(),
-            RW::RPipe(ref mut pipe) => Stdio::from(pipe.take().expect("PipeReader already taken")),
-            RW::WPipe(ref mut pipe) => Stdio::from(pipe.take().expect("PipeWriter already taken")),
+            RW::RPipe(pipe) => Stdio::from(pipe.take().expect("PipeReader already taken")),
+            RW::WPipe(pipe) => Stdio::from(pipe.take().expect("PipeWriter already taken")),
             _ => Stdio::piped(),
         }
     }
