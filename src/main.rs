@@ -260,7 +260,10 @@ fn handle_cd(args: Vec<String>) -> Response {
             if msg == "No such file or directory (os error 2)" {
                 Response {
                     output: None,
-                    error: Some(format!("cd: {path:?}: No such file or directory\n")),
+                    error: Some(format!(
+                        "cd: {}: No such file or directory\n",
+                        path.to_string_lossy().to_string()
+                    )),
                 }
             } else {
                 Response {
