@@ -17,7 +17,7 @@ pub const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 pub fn get_external_executables() -> (HashMap<String, String>, Vec<String>) {
     let mut path_executables = HashMap::new();
 
-    let path = env::var("PATH").expect("Failed to fatch PATH!");
+    let path = env::var("PATH").expect("Failed to fetch PATH!");
     for dir in split_paths(&path) {
         if !dir.exists() {
             continue;

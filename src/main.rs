@@ -1,15 +1,15 @@
-use std::{io::pipe, process};
+use std::{io::pipe, process, str::FromStr};
 
 use rustyline::{config::BellStyle, CompletionType, Config, Editor};
 
 use shell::{
     execution::{execute, get_external_executables, ExecuteArgs},
+    lexer::tokenize,
     prompt::{get_input, Prompt},
     rw::RW,
-    value::tokenize,
 };
 
-use crate::shell::{execution::finalize_executions, value::REDIRECTIONS};
+use crate::shell::{execution::finalize_executions, lexer::RedirectionType};
 
 mod shell;
 
@@ -49,7 +49,7 @@ fn main() {
 
         if let Some(redirection_index) = tokens
             .iter()
-            .position(|arg| REDIRECTIONS.contains(&arg.as_str()))
+            .position(|arg| RedirectionType::from_str(arg).is_ok())
             .filter(|&idx| idx < tokens.len() - 1)
         {
             let redirection_type = tokens[redirection_index].as_str();
@@ -80,7 +80,7 @@ fn main() {
             .filter(|&idx| idx < tokens.len() - 1)
         {
             let (pipe_rx, pipe_tx) = pipe().unwrap_or_else(|e| {
-                eprintln!("Faled to create pipe: {}", e);
+                eprintln!("Failed to create pipe: {}", e);
                 process::exit(1);
             });
             let (pre_params, post_params) = params.split_at(pipe_index);
