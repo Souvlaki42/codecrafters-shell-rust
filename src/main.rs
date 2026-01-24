@@ -250,15 +250,25 @@ fn handle_cd(args: Vec<String>) -> Response {
         })
         .unwrap_or(default_path);
 
-    match env::set_current_dir(path) {
+    match env::set_current_dir(&path) {
         Ok(()) => Response {
             output: None,
             error: None,
         },
-        Err(err) => Response {
-            output: None,
-            error: Some(err.to_string() + "\n"),
-        },
+        Err(err) => {
+            let msg = err.to_string();
+            if msg == "No such file or directory (os error 2)" {
+                Response {
+                    output: None,
+                    error: Some(format!("cd: {path:?}: No such file or directory\n")),
+                }
+            } else {
+                Response {
+                    output: None,
+                    error: Some(msg + "\n"),
+                }
+            }
+        }
     }
 }
 
