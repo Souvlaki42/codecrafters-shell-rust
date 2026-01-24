@@ -28,7 +28,7 @@ fn main() {
     rl.set_helper(Some(prompt));
 
     loop {
-        let input = get_input(&mut rl, "$ ");
+        let input = get_input(&mut rl);
 
         if input.is_none() {
             continue;

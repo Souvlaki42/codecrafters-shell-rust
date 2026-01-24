@@ -48,16 +48,16 @@ impl Completer for Prompt {
     }
 }
 
-pub fn get_input(rl: &mut Editor<Prompt, FileHistory>, prompt: &str) -> Option<String> {
-    let readline = rl.readline(prompt);
+pub fn get_input(rl: &mut Editor<Prompt, FileHistory>) -> Option<String> {
+    let readline = rl.readline("$ ");
     match readline {
         Ok(line) => Some(line),
         Err(ReadlineError::Interrupted) => {
-            println!("CTRL-C");
+            println!("^C");
             None
         }
         Err(ReadlineError::Eof) => {
-            println!("CTRL-D");
+            println!("^D");
             None
         }
         Err(err) => {
