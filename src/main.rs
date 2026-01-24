@@ -349,23 +349,23 @@ fn write_output<T: Write>(
     mut default_writer: T,
 ) -> io::Result<()> {
     if let Some(ref path) = append_path {
-        OpenOptions::new()
+        return OpenOptions::new()
             .create(true)
             .append(true)
             .write(true)
             .open(path)
             .expect(format!("Failed to append to {}!", path).as_str())
-            .write_all(output.clone().unwrap_or_default().as_bytes())?
+            .write_all(output.clone().unwrap_or_default().as_bytes());
     };
 
     if let Some(ref path) = redirect_path {
-        OpenOptions::new()
+        return OpenOptions::new()
             .create(true)
             .append(false)
             .write(true)
             .open(path)
             .expect(format!("Failed to write to {}!", path).as_str())
-            .write_all(output.clone().unwrap_or_default().as_bytes())?
+            .write_all(output.clone().unwrap_or_default().as_bytes());
     };
 
     default_writer.write_all(output.unwrap_or_default().as_bytes())
