@@ -10,7 +10,9 @@ Just clone the repository and run `cargo run --release`.
 
 ## Progress
 
-At the time of writing this, I'm stuck at stage #BR6 - `Dual-command pipeline`.
+Rewritten based [this user's code](https://github.com/cc-code-examples/bright-moose-721880/blob/main/src/main.rs).
+
+At the time of writing this, I'm still stuck at stage #BR6 - `Dual-command pipeline`.
 
 ## License
 
