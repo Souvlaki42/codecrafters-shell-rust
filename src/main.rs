@@ -200,7 +200,11 @@ fn handle_type(args: Vec<String>) -> Response {
         };
     } else if let Some(path) = externals.get(cmd) {
         return Response {
-            output: Some(format!("{} is {:?}\n", cmd, path)),
+            output: Some(format!(
+                "{} is {}\n",
+                cmd,
+                path.to_string_lossy().to_string()
+            )),
             error: None,
         };
     } else {
