@@ -3,7 +3,7 @@ use std::{
     env::{self, split_paths},
     fs::{self, OpenOptions},
     io::{self, Write},
-    os::unix::fs::PermissionsExt,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
     process::{self, Command, Stdio},
 };
@@ -34,7 +34,7 @@ impl ShellHelper {
         let builtins = BUILTINS.map(String::from).to_vec();
         let executables = get_external_executables();
 
-        self.commands = Vec::from_iter(executables.keys().map(|k| k.clone()));
+        self.commands = Vec::from_iter(executables.keys().cloned());
         self.commands.extend(builtins);
     }
     pub fn new() -> Self {
@@ -42,7 +42,7 @@ impl ShellHelper {
             commands: Vec::new(),
         };
         instance.update_commands();
-        return instance;
+        instance
     }
 }
 
@@ -187,31 +187,27 @@ fn handle_type(args: Vec<String>) -> Response {
         return help_msg;
     }
 
-    let Some(cmd) = args.get(0) else {
+    let Some(cmd) = args.first() else {
         return help_msg;
     };
 
     let externals = get_external_executables();
 
     if BUILTINS.contains(&cmd.as_str()) {
-        return Response {
+        Response {
             output: Some(format!("{} is a shell builtin\n", cmd)),
             error: None,
-        };
+        }
     } else if let Some(path) = externals.get(cmd) {
-        return Response {
-            output: Some(format!(
-                "{} is {}\n",
-                cmd,
-                path.to_string_lossy().to_string()
-            )),
+        Response {
+            output: Some(format!("{} is {}\n", cmd, path.to_string_lossy())),
             error: None,
-        };
+        }
     } else {
-        return Response {
+        Response {
             output: None,
             error: Some(format!("{}: not found\n", cmd)),
-        };
+        }
     }
 }
 
@@ -244,12 +240,12 @@ fn handle_cd(args: Vec<String>) -> Response {
 
     let default_path = env::home_dir().expect("Couldn't find $HOME path!");
     let path = args
-        .get(0)
-        .and_then(|s| {
+        .first()
+        .map(|s| {
             if s == "~" {
-                Some(default_path.clone())
+                default_path.clone()
             } else {
-                Some(PathBuf::from(s))
+                PathBuf::from(s)
             }
         })
         .unwrap_or(default_path);
@@ -266,7 +262,7 @@ fn handle_cd(args: Vec<String>) -> Response {
                     output: None,
                     error: Some(format!(
                         "cd: {}: No such file or directory\n",
-                        path.to_string_lossy().to_string()
+                        path.to_string_lossy()
                     )),
                 }
             } else {
@@ -289,7 +285,7 @@ fn handle_exit(args: Vec<String>) -> Response {
         };
     }
 
-    let exit_code = args.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let exit_code = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     process::exit(exit_code);
 }
 fn handle_external(cmd: &str, args: Vec<String>) -> Response {
@@ -349,9 +345,9 @@ fn write_output<T: Write>(
         return OpenOptions::new()
             .create(true)
             .append(true)
-            .write(true)
+            .truncate(false)
             .open(path)
-            .expect(format!("Failed to append to {}!", path).as_str())
+            .unwrap_or_else(|_| panic!("Failed to append to {}!", path))
             .write_all(output.clone().unwrap_or_default().as_bytes());
     };
 
@@ -359,9 +355,9 @@ fn write_output<T: Write>(
         return OpenOptions::new()
             .create(true)
             .append(false)
-            .write(true)
+            .truncate(true)
             .open(path)
-            .expect(format!("Failed to write to {}!", path).as_str())
+            .unwrap_or_else(|_| panic!("Failed to write to {}!", path))
             .write_all(output.clone().unwrap_or_default().as_bytes());
     };
 
