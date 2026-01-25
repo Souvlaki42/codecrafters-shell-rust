@@ -354,7 +354,7 @@ fn handle_cmd(cmd: &str, args: Vec<String>) -> Response {
         "pwd" => handle_pwd(args),
         "cd" => handle_cd(args),
         "exit" => handle_exit(args),
-        "ls" => handle_ls(args), // FIXME: temporarily #UN3 test case fix
+        // "ls" => handle_ls(args), // FIXME: temporarily #UN3 test case fix
         _ => handle_external(cmd, args),
     }
 }
