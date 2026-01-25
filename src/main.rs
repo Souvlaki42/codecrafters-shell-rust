@@ -94,7 +94,7 @@ fn get_external_executables() -> HashMap<String, PathBuf> {
             }
 
             if let Some(file_name) = path.file_name().map(|f| f.to_string_lossy().to_string()) {
-                results.entry(file_name.clone()).or_insert(path);
+                results.entry(file_name).or_insert(path);
             }
         }
     }
@@ -328,25 +328,6 @@ fn handle_external(cmd: &str, args: Vec<String>) -> Response {
     Response { output, error }
 }
 
-fn handle_ls(args: Vec<String>) -> Response {
-    let response = handle_external("ls", args);
-    let output = response.clone().output;
-    let Some(ref error) = response.error else {
-        return response;
-    };
-    let Some(argument) = error
-        .strip_prefix("ls: cannot access '")
-        .and_then(|s| s.strip_suffix("': No such file or directory\n"))
-    else {
-        return response;
-    };
-
-    return Response {
-        output,
-        error: Some(format!("ls: {}: No such file or directory\n", argument)),
-    };
-}
-
 fn handle_cmd(cmd: &str, args: Vec<String>) -> Response {
     match cmd {
         "echo" => handle_echo(args),
@@ -354,7 +335,6 @@ fn handle_cmd(cmd: &str, args: Vec<String>) -> Response {
         "pwd" => handle_pwd(args),
         "cd" => handle_cd(args),
         "exit" => handle_exit(args),
-        // "ls" => handle_ls(args), // FIXME: temporarily #UN3 test case fix
         _ => handle_external(cmd, args),
     }
 }
