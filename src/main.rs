@@ -7,6 +7,7 @@ use std::{
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
     process::{self, Child, Command, Stdio},
+    sync::{Arc, Mutex},
     thread::{self, JoinHandle},
 };
 
@@ -22,6 +23,7 @@ use rustyline::{
 const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "history"];
 
 type IOJoinHandle = JoinHandle<io::Result<()>>;
+type Shell = Editor<ShellHelper, FileHistory>;
 
 #[derive(Debug)]
 enum IOSource {
@@ -237,27 +239,44 @@ fn handle_echo(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
         .write_all(format!("{}\n", args.join(" ")).as_bytes())
 }
 
-fn handle_history(args: Vec<String>, pipes: &mut IOPipes, history: Vec<String>) -> io::Result<()> {
-    let help_msg = "Usage: history [number of entries: optional (default: all)]\n".as_bytes();
+fn handle_history(
+    args: Vec<String>,
+    pipes: &mut IOPipes,
+    editor: Arc<Mutex<Shell>>,
+) -> io::Result<()> {
+    let help_msg = "Usage: history [[number of entries: optional (default: all)] or -r [file path to load history from]]\n".as_bytes();
 
-    if args.len() > 1 {
+    if args.len() > 2 {
         return pipes.error.write_all(help_msg);
     }
 
-    let entries = match args.first() {
-        Some(arg) => {
-            let Ok(number) = arg.parse() else {
-                return pipes.error.write_all(help_msg);
-            };
-            history
-                .iter()
-                .enumerate()
-                .rev()
-                .take(number)
-                .rev()
-                .collect_vec()
-        }
-        None => history.iter().enumerate().collect_vec(),
+    let mut editor = editor.lock().expect("Couldn't lock the editor!");
+
+    let number = args.first().and_then(|a| a.parse().ok());
+
+    let path = if args.first() == Some(&"-r".to_string()) {
+        args.get(1).take()
+    } else {
+        None
+    };
+
+    let history = editor.history().iter().cloned().collect_vec();
+
+    let entries = if let Some(num) = number {
+        history
+            .iter()
+            .enumerate()
+            .rev()
+            .take(num)
+            .rev()
+            .collect_vec()
+    } else if let Some(file_path) = path {
+        editor
+            .load_history(file_path)
+            .expect(format!("Failed to load history from '{}'", file_path).as_str());
+        editor.history().iter().enumerate().collect_vec()
+    } else {
+        editor.history().iter().enumerate().collect_vec()
     };
 
     for (index, entry) in entries {
@@ -394,7 +413,7 @@ fn handle_external(
 fn handle_cmd(
     cmd: &str,
     args: Vec<String>,
-    editor: &mut Editor<ShellHelper, FileHistory>,
+    editor: Arc<Mutex<Shell>>,
     input: IOSource,
     output: IOSource,
     error: IOSource,
@@ -466,7 +485,6 @@ fn handle_cmd(
             Ok((None, Some(handle)))
         }
         "history" => {
-            let history = editor.history().into_iter().cloned().collect_vec();
             let handle = thread::spawn(move || {
                 handle_history(
                     args,
@@ -475,7 +493,7 @@ fn handle_cmd(
                         output,
                         error,
                     },
-                    history,
+                    Arc::clone(&editor),
                 )
             });
             Ok((None, Some(handle)))
@@ -510,7 +528,7 @@ fn checks_redirects(
     Ok(None)
 }
 
-fn handle(inputs: Vec<String>, editor: &mut Editor<ShellHelper, FileHistory>) -> io::Result<()> {
+fn handle(inputs: Vec<String>, editor: Arc<Mutex<Shell>>) -> io::Result<()> {
     let mut children = Vec::new();
     let mut handles = Vec::new();
 
@@ -565,7 +583,7 @@ fn handle(inputs: Vec<String>, editor: &mut Editor<ShellHelper, FileHistory>) ->
         handle_cmd(
             command.trim(),
             args,
-            editor,
+            Arc::clone(&editor),
             input_reader,
             output_writer,
             error_writer,
@@ -607,8 +625,14 @@ fn main() -> io::Result<()> {
     editor.set_history_ignore_space(true);
     editor.set_auto_add_history(true);
 
+    let editor = Arc::new(Mutex::new(editor));
+
     loop {
-        let line = match editor.readline("$ ") {
+        let line = match editor
+            .lock()
+            .expect("Couldn't lock the editor!")
+            .readline("$ ")
+        {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => {
                 println!("^C");
@@ -625,7 +649,7 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        handle(inputs, &mut editor)?;
+        handle(inputs, Arc::clone(&editor))?;
     }
 
     Ok(())

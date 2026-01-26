@@ -12,7 +12,7 @@ Just clone the repository and run `cargo run --release`.
 
 Rewritten based on [this user's](https://app.codecrafters.io/users/Elliot-Barnes) interesting [code](https://github.com/cc-code-examples/bright-moose-721880/blob/main/src/main.rs).
 
-At the time of writing this, I'm stuck in `Limiting history entries` #ag6.
+At the time of writing this, I'm stuck in `Read history from file` #za2.
 
 ## License
 
