@@ -16,9 +16,10 @@ use rustyline::{
     completion::{Completer, Pair},
     config::{BellStyle, Configurer},
     error::ReadlineError,
+    history::FileHistory,
 };
 
-const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
+const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "history"];
 
 type IOJoinHandle = JoinHandle<io::Result<()>>;
 
@@ -236,6 +237,15 @@ fn handle_echo(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
         .write_all(format!("{}\n", args.join(" ")).as_bytes())
 }
 
+fn handle_history(pipes: &mut IOPipes, history: Vec<String>) -> io::Result<()> {
+    for (i, entry) in history.iter().enumerate() {
+        pipes
+            .output
+            .write_all(format!("    {} {}\n", i + 1, entry).as_bytes())?;
+    }
+    Ok(())
+}
+
 fn handle_type(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     let help_msg = "Usage: type [command: required]\n".as_bytes();
 
@@ -362,6 +372,7 @@ fn handle_external(
 fn handle_cmd(
     cmd: &str,
     args: Vec<String>,
+    editor: &mut Editor<ShellHelper, FileHistory>,
     input: IOSource,
     output: IOSource,
     error: IOSource,
@@ -432,6 +443,20 @@ fn handle_cmd(
             });
             Ok((None, Some(handle)))
         }
+        "history" => {
+            let history = editor.history().into_iter().cloned().collect_vec();
+            let handle = thread::spawn(move || {
+                handle_history(
+                    &mut IOPipes {
+                        input,
+                        output,
+                        error,
+                    },
+                    history,
+                )
+            });
+            Ok((None, Some(handle)))
+        }
         _ => handle_external(cmd, args, input, output, error).map(|c| (c, None)),
     }
 }
@@ -462,7 +487,7 @@ fn checks_redirects(
     Ok(None)
 }
 
-fn handle(inputs: Vec<String>) -> io::Result<()> {
+fn handle(inputs: Vec<String>, editor: &mut Editor<ShellHelper, FileHistory>) -> io::Result<()> {
     let mut children = Vec::new();
     let mut handles = Vec::new();
 
@@ -517,6 +542,7 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
         handle_cmd(
             command.trim(),
             args,
+            editor,
             input_reader,
             output_writer,
             error_writer,
@@ -576,7 +602,7 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        handle(inputs)?
+        handle(inputs, &mut editor)?
     }
 
     Ok(())
