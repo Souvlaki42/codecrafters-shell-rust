@@ -1,11 +1,14 @@
 use std::{
     collections::HashMap,
     env::{self, split_paths},
+    error::Error,
+    fmt::Debug,
     fs::{self, OpenOptions},
-    io::{self, Write},
+    io::{self, PipeReader, PipeWriter, Read, Write, pipe},
+    ops::Deref,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
-    process::{self, Command, Stdio},
+    process::{self, Child, Command, Stdio},
 };
 
 use itertools::Itertools;
@@ -18,10 +21,10 @@ use rustyline::{
 
 const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "hash"];
 
-#[derive(Debug, Clone)]
-struct Response {
-    output: Option<String>,
-    error: Option<String>,
+struct IOPipes {
+    input: Box<dyn Read>,
+    output: Box<dyn Write>,
+    error: Box<dyn Write>,
 }
 
 #[derive(Debug, Helper, Validator, Highlighter, Hinter)]
@@ -170,72 +173,61 @@ fn get_redirect(args: &mut Vec<String>, redirect_pipes: Vec<String>) -> Option<S
     }
 }
 
-fn handle_echo(args: Vec<String>) -> Response {
-    Response {
-        output: Some(args.join(" ") + "\n"),
-        error: None,
-    }
+fn handle_echo(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
+    pipes
+        .output
+        .write_all(format!("{}\n", args.join(" ")).as_bytes())
 }
 
-fn handle_type(args: Vec<String>) -> Response {
-    let help_msg = Response {
-        output: None,
-        error: Some(String::from("Usage: type [command: required]\n")),
-    };
+fn handle_type(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
+    let help_msg = "Usage: type [command: required]\n".as_bytes();
 
     if args.len() != 1 {
-        return help_msg;
+        return pipes.error.write_all(help_msg);
     }
 
     let Some(cmd) = args.first() else {
-        return help_msg;
+        return pipes.error.write_all(help_msg);
     };
 
     let externals = get_external_executables();
 
     if BUILTINS.contains(&cmd.as_str()) {
-        Response {
-            output: Some(format!("{} is a shell builtin\n", cmd)),
-            error: None,
-        }
+        pipes
+            .output
+            .write_all(format!("{} is a shell builtin\n", cmd).as_bytes())
     } else if let Some(path) = externals.get(cmd) {
-        Response {
-            output: Some(format!("{} is {}\n", cmd, path.to_string_lossy())),
-            error: None,
-        }
+        pipes
+            .output
+            .write_all(format!("{} is {}\n", cmd, path.to_string_lossy()).as_bytes())
     } else {
-        Response {
-            output: None,
-            error: Some(format!("{}: not found\n", cmd)),
-        }
+        pipes
+            .error
+            .write_all(format!("{}: not found\n", cmd).as_bytes())
     }
 }
 
-fn handle_pwd(args: Vec<String>) -> Response {
+fn handle_pwd(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     if !args.is_empty() {
-        return Response {
-            output: None,
-            error: Some(String::from("Usage: pwd\n")),
-        };
+        return pipes.error.write_all("Usage: pwd\n".as_bytes());
     }
 
-    Response {
-        output: Some(format!(
+    pipes.output.write_all(
+        format!(
             "{}\n",
             env::current_dir()
                 .expect("Failed to get current working directory")
                 .to_string_lossy()
-        )),
-        error: None,
-    }
+        )
+        .as_bytes(),
+    )
 }
 
-fn handle_cd(args: Vec<String>) -> Response {
+fn handle_cd(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     if args.len() > 1 {
-        return Response {
-            output: None,
-            error: Some(String::from("Usage: cd [path: optional (default: ~)]\n")),
-        };
+        return pipes
+            .error
+            .write_all("Usage: cd [path: optional (default: ~)]\n".as_bytes());
     }
 
     let default_path = env::home_dir().expect("Couldn't find $HOME path!");
@@ -251,167 +243,168 @@ fn handle_cd(args: Vec<String>) -> Response {
         .unwrap_or(default_path);
 
     match env::set_current_dir(&path) {
-        Ok(()) => Response {
-            output: None,
-            error: None,
-        },
+        Ok(()) => Ok(()),
         Err(err) => {
             let msg = err.to_string();
             if msg == "No such file or directory (os error 2)" {
-                Response {
-                    output: None,
-                    error: Some(format!(
+                pipes.error.write_all(
+                    format!(
                         "cd: {}: No such file or directory\n",
                         path.to_string_lossy()
-                    )),
-                }
+                    )
+                    .as_bytes(),
+                )
             } else {
-                Response {
-                    output: None,
-                    error: Some(msg + "\n"),
-                }
+                pipes.error.write_all(format!("{}\n", msg).as_bytes())
             }
         }
     }
 }
 
-fn handle_exit(args: Vec<String>) -> Response {
+fn handle_exit(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     if args.len() > 1 {
-        return Response {
-            output: None,
-            error: Some(String::from(
-                "Usage: exit [exit_code: optional (default: 0)]\n",
-            )),
-        };
+        return pipes
+            .error
+            .write_all("Usage: exit [exit_code: optional (default: 0)]\n".as_bytes());
     }
 
     let exit_code = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     process::exit(exit_code);
 }
-fn handle_external(cmd: &str, args: Vec<String>) -> Response {
+fn handle_external(cmd: &str, args: Vec<String>, pipes: &mut IOPipes) -> io::Result<Option<Child>> {
     let externals = get_external_executables();
     let Some(executable) = externals.get(cmd) else {
-        return Response {
-            output: None,
-            error: Some(format!("{}: command not found\n", cmd)),
-        };
+        pipes
+            .error
+            .write_all(format!("{}: command not found\n", cmd).as_bytes());
+        return Ok(None);
     };
 
-    let result = match Command::new(executable).arg0(cmd).args(args).output() {
+    // FIXME: Make this work
+    let stdin = Stdio::from(pipes.input.deref());
+    let stdout = Stdio::from(pipes.output.deref());
+    let stderr = Stdio::from(pipes.error.deref());
+
+    let child = match Command::new(executable)
+        .arg0(cmd)
+        .args(args)
+        .stdin(stdin)
+        .stdout(stdout)
+        .stderr(stderr)
+        .spawn()
+    {
         Ok(output) => output,
         Err(err) => {
-            return Response {
-                output: None,
-                error: Some(format!(
-                    "Failed to spawn command '{:?}': {}\n",
-                    executable, err
-                )),
-            };
+            pipes.error.write_all(
+                format!("Failed to spawn command '{:?}': {}\n", executable, err).as_bytes(),
+            );
+            return Ok(None);
         }
     };
 
-    let output = if result.stdout.is_empty() {
-        None
-    } else {
-        Some(String::from_utf8_lossy(&result.stdout).to_string())
-    };
-    let error = if result.stderr.is_empty() {
-        None
-    } else {
-        Some(String::from_utf8_lossy(&result.stderr).to_string())
-    };
-
-    Response { output, error }
+    Ok(Some(child))
 }
 
-fn handle_cmd(cmd: &str, args: Vec<String>) -> Response {
+// FIXME: Fix these errors
+fn handle_cmd(cmd: &str, args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     match cmd {
-        "echo" => handle_echo(args),
-        "type" => handle_type(args),
-        "pwd" => handle_pwd(args),
-        "cd" => handle_cd(args),
-        "exit" => handle_exit(args),
-        _ => handle_external(cmd, args),
+        "echo" => handle_echo(args, pipes),
+        "type" => handle_type(args, pipes),
+        "pwd" => handle_pwd(args, pipes),
+        "cd" => handle_cd(args, pipes),
+        "exit" => handle_exit(args, pipes),
+        _ => handle_external(cmd, args, pipes),
     }
 }
 
-fn write_output<T: Write>(
-    output: Option<String>,
+fn checks_redirects(
     redirect_path: Option<String>,
     append_path: Option<String>,
-    mut default_writer: T,
-) -> io::Result<()> {
+) -> Option<impl Write> {
     if let Some(ref path) = append_path {
-        return OpenOptions::new()
-            .create(true)
-            .append(true)
-            .truncate(false)
-            .open(path)
-            .unwrap_or_else(|_| panic!("Failed to append to {}!", path))
-            .write_all(output.clone().unwrap_or_default().as_bytes());
+        return Some(
+            OpenOptions::new()
+                .create(true)
+                .append(true)
+                .truncate(false)
+                .open(path)
+                .unwrap_or_else(|_| panic!("Failed to append to {}!", path)),
+        );
     };
 
     if let Some(ref path) = redirect_path {
-        return OpenOptions::new()
-            .create(true)
-            .append(false)
-            .truncate(true)
-            .open(path)
-            .unwrap_or_else(|_| panic!("Failed to write to {}!", path))
-            .write_all(output.clone().unwrap_or_default().as_bytes());
+        return Some(
+            OpenOptions::new()
+                .create(true)
+                .append(false)
+                .truncate(true)
+                .open(path)
+                .unwrap_or_else(|_| panic!("Failed to write to {}!", path)),
+        );
     };
 
-    default_writer.write_all(output.unwrap_or_default().as_bytes())
+    return None;
 }
 
-fn handle(input: String) -> io::Result<()> {
-    let mut parsed = parse_args(input);
-    let command = parsed.remove(0);
-    let mut args = parsed;
-    let redirect_path = get_redirect(&mut args, vec![">".to_string(), "1>".to_string()]);
-    let err_redirect_path = get_redirect(&mut args, vec!["2>".to_string()]);
-    let append_path = get_redirect(&mut args, vec![">>".to_string(), "1>>".to_string()]);
-    let err_append_path = get_redirect(&mut args, vec!["2>>".to_string()]);
-    let result = handle_cmd(command.trim(), args);
+// FIXME: Wait for children
+// OPTIONALLY: spawn threads for builtins with concurrency
+fn handle(inputs: Vec<String>) -> io::Result<()> {
+    let mut pipes = Vec::new();
 
-    write_output(result.output, redirect_path, append_path, io::stdout())?;
-    write_output(
-        result.error,
-        err_redirect_path,
-        err_append_path,
-        io::stderr(),
-    )?;
+    for _ in 0..inputs.len() - 1 {
+        pipes.push(Some(pipe()?));
+    }
+
+    for (index, input) in inputs.iter().enumerate() {
+        let mut parsed = parse_args(input.clone());
+        let command = parsed.remove(0);
+        let mut args = parsed;
+        let redirect_path = get_redirect(&mut args, vec![">".to_string(), "1>".to_string()]);
+        let err_redirect_path = get_redirect(&mut args, vec!["2>".to_string()]);
+        let append_path = get_redirect(&mut args, vec![">>".to_string(), "1>>".to_string()]);
+        let err_append_path = get_redirect(&mut args, vec!["2>>".to_string()]);
+
+        let input_reader: Box<dyn Read>;
+        let output_writer: Box<dyn Write>;
+        let error_writer: Box<dyn Write>;
+
+        input_reader = if index == 0 {
+            Box::new(io::stdin())
+        } else {
+            Box::new(
+                pipes[index - 1]
+                    .take()
+                    .expect("Pipe reader should be there!")
+                    .0,
+            )
+        };
+
+        output_writer = match checks_redirects(redirect_path, append_path) {
+            Some(file) => Box::new(file),
+            None => {
+                if index + 1 == inputs.len() {
+                    Box::new(io::stdout())
+                } else {
+                    Box::new(pipes[index].take().expect("Pipe writer should be there!").1)
+                }
+            }
+        };
+
+        error_writer = match checks_redirects(err_redirect_path, err_append_path) {
+            Some(file) => Box::new(file),
+            None => Box::new(io::stderr()),
+        };
+
+        let mut io_pipes = IOPipes {
+            input: input_reader,
+            output: output_writer,
+            error: error_writer,
+        };
+
+        handle_cmd(command.trim(), args, &mut io_pipes)?;
+    }
 
     Ok(())
-}
-
-fn handle_pipelines(commands: Vec<String>) {
-    let mut previous = None;
-    let mut children = Vec::new();
-    for cmd_str in &commands {
-        let mut parts = cmd_str.split_whitespace();
-        let program = parts.next().expect("Program not found!");
-        let args = parts.collect_vec();
-
-        let mut cmd = Command::new(program);
-        cmd.args(args);
-
-        if let Some(stdout) = previous {
-            cmd.stdin(stdout);
-        }
-
-        if cmd_str != commands.last().expect("Commands not found!") {
-            cmd.stdout(Stdio::piped());
-        }
-
-        let mut child = cmd.spawn().expect("Failed to spawn child!");
-        previous = child.stdout.take().map(Stdio::from);
-        children.push(child);
-    }
-
-    for mut child in children {
-        child.wait().expect("Child failed!");
-    }
 }
 
 // TODO: status codes, flushing
@@ -444,10 +437,6 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        if inputs.len() == 1 {
-            handle(line)?;
-        } else {
-            handle_pipelines(inputs);
-        }
+        handle(inputs)?
     }
 }
