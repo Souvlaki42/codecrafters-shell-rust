@@ -237,8 +237,24 @@ fn handle_echo(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
         .write_all(format!("{}\n", args.join(" ")).as_bytes())
 }
 
-fn handle_history(pipes: &mut IOPipes, history: Vec<String>) -> io::Result<()> {
-    for (i, entry) in history.iter().enumerate() {
+fn handle_history(args: Vec<String>, pipes: &mut IOPipes, history: Vec<String>) -> io::Result<()> {
+    let help_msg = "Usage: history [number of entries: optional (default: all)]\n".as_bytes();
+
+    if args.len() > 1 {
+        return pipes.error.write_all(help_msg);
+    }
+
+    let entries = match args.first() {
+        Some(arg) => {
+            let Ok(number) = arg.parse() else {
+                return pipes.error.write_all(help_msg);
+            };
+            history.iter().rev().take(number).rev().collect_vec()
+        }
+        None => history.iter().collect_vec(),
+    };
+
+    for (i, entry) in entries.iter().enumerate() {
         pipes
             .output
             .write_all(format!("    {} {}\n", i + 1, entry).as_bytes())?;
@@ -447,6 +463,7 @@ fn handle_cmd(
             let history = editor.history().into_iter().cloned().collect_vec();
             let handle = thread::spawn(move || {
                 handle_history(
+                    args,
                     &mut IOPipes {
                         input,
                         output,
