@@ -599,7 +599,6 @@ fn main() -> io::Result<()> {
 
     editor.set_helper(Some(shell_helper));
     editor.set_history_ignore_space(true);
-    editor.set_auto_add_history(true);
 
     loop {
         let line = match editor.readline("$ ") {
@@ -619,7 +618,24 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        handle(inputs, &mut editor)?
+        handle(inputs, &mut editor)?;
+
+        if let Err(err) = editor.add_history_entry(line) {
+            match err {
+                ReadlineError::Interrupted => {
+                    println!("^C");
+                    continue;
+                }
+                ReadlineError::Eof => {
+                    println!("^D");
+                    break;
+                }
+                err => {
+                    println!("Error: {err:?}");
+                    break;
+                }
+            }
+        };
     }
 
     Ok(())
