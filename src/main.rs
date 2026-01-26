@@ -249,7 +249,13 @@ fn handle_history(args: Vec<String>, pipes: &mut IOPipes, history: Vec<String>) 
             let Ok(number) = arg.parse() else {
                 return pipes.error.write_all(help_msg);
             };
-            history.iter().enumerate().rev().take(number).collect_vec()
+            history
+                .iter()
+                .enumerate()
+                .rev()
+                .take(number)
+                .rev()
+                .collect_vec()
         }
         None => history.iter().enumerate().collect_vec(),
     };
