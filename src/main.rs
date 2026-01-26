@@ -20,6 +20,8 @@ use rustyline::{
 
 const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "hash"];
 
+type IOJoinHandle = JoinHandle<io::Result<()>>;
+
 #[derive(Debug)]
 enum IOSource {
     PipeReader(PipeReader),
@@ -44,14 +46,14 @@ impl From<IOSource> for Stdio {
 }
 
 impl Write for IOSource {
-    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         match self {
             IOSource::PipeReader(_) => unreachable!(),
-            IOSource::PipeWriter(writer) => writer.write_all(&mut buf),
-            IOSource::File(file) => file.write_all(&mut buf),
-            IOSource::Stdout => io::stdout().write_all(&mut buf),
+            IOSource::PipeWriter(writer) => writer.write_all(buf),
+            IOSource::File(file) => file.write_all(buf),
+            IOSource::Stdout => io::stdout().write_all(buf),
             IOSource::Stdin => unreachable!(),
-            IOSource::Stderr => io::stderr().write_all(&mut buf),
+            IOSource::Stderr => io::stderr().write_all(buf),
         }
     }
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -377,7 +379,7 @@ fn handle_cmd(
     input: IOSource,
     output: IOSource,
     error: IOSource,
-) -> io::Result<(Option<Child>, Option<JoinHandle<io::Result<()>>>)> {
+) -> io::Result<(Option<Child>, Option<IOJoinHandle>)> {
     match cmd {
         "echo" => {
             let handle = thread::spawn(move || {
@@ -456,10 +458,9 @@ fn checks_redirects(
         return OpenOptions::new()
             .create(true)
             .append(true)
-            .write(true)
             .truncate(false)
             .open(path)
-            .map(|f| Some(f));
+            .map(Some);
     };
 
     if let Some(ref path) = redirect_path {
@@ -469,13 +470,12 @@ fn checks_redirects(
             .write(true)
             .truncate(true)
             .open(path)
-            .map(|f| Some(f));
+            .map(Some);
     };
 
-    return Ok(None);
+    Ok(None)
 }
 
-// OPTIONALLY: spawn threads for builtins with concurrency
 fn handle(inputs: Vec<String>) -> io::Result<()> {
     let mut children = Vec::new();
     let mut handles = Vec::new();
@@ -498,11 +498,7 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
         let append_path = get_redirect(&mut args, vec![">>".to_string(), "1>>".to_string()]);
         let err_append_path = get_redirect(&mut args, vec!["2>>".to_string()]);
 
-        let input_reader: IOSource;
-        let output_writer: IOSource;
-        let error_writer: IOSource;
-
-        input_reader = if index == 0 {
+        let input_reader = if index == 0 {
             IOSource::Stdin
         } else {
             IOSource::PipeReader(
@@ -512,7 +508,7 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
             )
         };
 
-        output_writer = match checks_redirects(redirect_path, append_path)? {
+        let output_writer = match checks_redirects(redirect_path, append_path)? {
             Some(file) => IOSource::File(file),
             None => {
                 if index + 1 == inputs.len() {
@@ -527,7 +523,7 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
             }
         };
 
-        error_writer = match checks_redirects(err_redirect_path, err_append_path)? {
+        let error_writer = match checks_redirects(err_redirect_path, err_append_path)? {
             Some(file) => IOSource::File(file),
             None => IOSource::Stderr,
         };
@@ -561,7 +557,9 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
     Ok(())
 }
 
-// TODO: status codes, flushing
+// TODO: status codes
+// TODO: input redirection
+// TODO: variable expansion
 fn main() -> io::Result<()> {
     let shell_helper = ShellHelper::new();
     let config = Config::builder()
@@ -569,6 +567,7 @@ fn main() -> io::Result<()> {
         .completion_type(CompletionType::List)
         .build();
     let mut editor = Editor::with_config(config).expect("Failed to setup the prompt");
+
     editor.set_helper(Some(shell_helper));
     editor.set_history_ignore_space(true);
     editor.set_auto_add_history(true);
@@ -582,15 +581,17 @@ fn main() -> io::Result<()> {
             }
             Err(ReadlineError::Eof) => {
                 println!("^D");
-                continue;
+                break;
             }
             Err(err) => {
                 println!("Error: {err:?}");
-                continue;
+                break;
             }
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
         handle(inputs)?
     }
+
+    Ok(())
 }
