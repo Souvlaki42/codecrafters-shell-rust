@@ -18,7 +18,7 @@ use rustyline::{
     error::ReadlineError,
 };
 
-const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "hash"];
+const BUILTINS: [&str; 5] = ["echo", "type", "exit", "pwd", "cd"];
 
 type IOJoinHandle = JoinHandle<io::Result<()>>;
 
@@ -99,26 +99,7 @@ struct IOPipes {
 }
 
 #[derive(Debug, Helper, Validator, Highlighter, Hinter)]
-struct ShellHelper {
-    commands: Vec<String>,
-}
-
-impl ShellHelper {
-    pub fn update_commands(&mut self) {
-        let builtins = BUILTINS.map(String::from).to_vec();
-        let executables = get_external_executables();
-
-        self.commands = Vec::from_iter(executables.keys().cloned());
-        self.commands.extend(builtins);
-    }
-    pub fn new() -> Self {
-        let mut instance = Self {
-            commands: Vec::new(),
-        };
-        instance.update_commands();
-        instance
-    }
-}
+struct ShellHelper;
 
 impl Completer for ShellHelper {
     type Candidate = Pair;
@@ -131,8 +112,13 @@ impl Completer for ShellHelper {
         let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
         let prefix = &line[start..pos].to_lowercase();
 
-        let mut matches: Vec<Pair> = self
-            .commands
+        let builtins = BUILTINS.map(String::from).to_vec();
+        let executables = get_external_executables();
+
+        let mut commands = Vec::from_iter(executables.keys().cloned());
+        commands.extend(builtins);
+
+        let mut matches: Vec<Pair> = commands
             .iter()
             .filter(|cmd| cmd.to_lowercase().starts_with(prefix))
             .map(|cmd| Pair {
@@ -561,7 +547,7 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
 // TODO: input redirection
 // TODO: variable expansion
 fn main() -> io::Result<()> {
-    let shell_helper = ShellHelper::new();
+    let shell_helper = ShellHelper {};
     let config = Config::builder()
         .bell_style(BellStyle::Audible)
         .completion_type(CompletionType::List)
