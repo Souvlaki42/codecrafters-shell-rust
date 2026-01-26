@@ -1,14 +1,13 @@
 use std::{
     collections::HashMap,
     env::{self, split_paths},
-    error::Error,
     fmt::Debug,
-    fs::{self, OpenOptions},
+    fs::{self, File, OpenOptions},
     io::{self, PipeReader, PipeWriter, Read, Write, pipe},
-    ops::Deref,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
     process::{self, Child, Command, Stdio},
+    thread::{self, JoinHandle},
 };
 
 use itertools::Itertools;
@@ -21,10 +20,80 @@ use rustyline::{
 
 const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "hash"];
 
+#[derive(Debug)]
+enum IOSource {
+    PipeReader(PipeReader),
+    PipeWriter(PipeWriter),
+    File(File),
+    Stdout,
+    Stdin,
+    Stderr,
+}
+
+impl From<IOSource> for Stdio {
+    fn from(value: IOSource) -> Self {
+        match value {
+            IOSource::PipeReader(reader) => Self::from(reader),
+            IOSource::PipeWriter(writer) => Self::from(writer),
+            IOSource::File(file) => Self::from(file),
+            IOSource::Stdout => Self::inherit(),
+            IOSource::Stdin => Self::inherit(),
+            IOSource::Stderr => Self::inherit(),
+        }
+    }
+}
+
+impl Write for IOSource {
+    fn write_all(&mut self, mut buf: &[u8]) -> io::Result<()> {
+        match self {
+            IOSource::PipeReader(_) => unreachable!(),
+            IOSource::PipeWriter(writer) => writer.write_all(&mut buf),
+            IOSource::File(file) => file.write_all(&mut buf),
+            IOSource::Stdout => io::stdout().write_all(&mut buf),
+            IOSource::Stdin => unreachable!(),
+            IOSource::Stderr => io::stderr().write_all(&mut buf),
+        }
+    }
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            IOSource::PipeReader(_) => unreachable!(),
+            IOSource::PipeWriter(writer) => writer.write(buf),
+            IOSource::File(file) => file.write(buf),
+            IOSource::Stdout => io::stdout().write(buf),
+            IOSource::Stdin => unreachable!(),
+            IOSource::Stderr => io::stderr().write(buf),
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            IOSource::PipeReader(_) => unreachable!(),
+            IOSource::PipeWriter(writer) => writer.flush(),
+            IOSource::File(file) => file.flush(),
+            IOSource::Stdout => io::stdout().flush(),
+            IOSource::Stdin => unreachable!(),
+            IOSource::Stderr => io::stderr().flush(),
+        }
+    }
+}
+
+impl Read for IOSource {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            IOSource::PipeReader(reader) => reader.read(buf),
+            IOSource::PipeWriter(_) => unreachable!(),
+            IOSource::File(file) => file.read(buf),
+            IOSource::Stdout => unreachable!(),
+            IOSource::Stdin => io::stdin().read(buf),
+            IOSource::Stderr => unreachable!(),
+        }
+    }
+}
+
 struct IOPipes {
-    input: Box<dyn Read>,
-    output: Box<dyn Write>,
-    error: Box<dyn Write>,
+    #[allow(dead_code)]
+    input: IOSource,
+    output: IOSource,
+    error: IOSource,
 }
 
 #[derive(Debug, Helper, Validator, Highlighter, Hinter)]
@@ -271,33 +340,30 @@ fn handle_exit(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     let exit_code = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     process::exit(exit_code);
 }
-fn handle_external(cmd: &str, args: Vec<String>, pipes: &mut IOPipes) -> io::Result<Option<Child>> {
+fn handle_external(
+    cmd: &str,
+    args: Vec<String>,
+    input: IOSource,
+    output: IOSource,
+    mut error: IOSource,
+) -> io::Result<Option<Child>> {
     let externals = get_external_executables();
     let Some(executable) = externals.get(cmd) else {
-        pipes
-            .error
-            .write_all(format!("{}: command not found\n", cmd).as_bytes());
+        error.write_all(format!("{}: command not found\n", cmd).as_bytes())?;
         return Ok(None);
     };
-
-    // FIXME: Make this work
-    let stdin = Stdio::from(pipes.input.deref());
-    let stdout = Stdio::from(pipes.output.deref());
-    let stderr = Stdio::from(pipes.error.deref());
 
     let child = match Command::new(executable)
         .arg0(cmd)
         .args(args)
-        .stdin(stdin)
-        .stdout(stdout)
-        .stderr(stderr)
+        .stdin(input)
+        .stdout(output)
+        .stderr(error)
         .spawn()
     {
         Ok(output) => output,
         Err(err) => {
-            pipes.error.write_all(
-                format!("Failed to spawn command '{:?}': {}\n", executable, err).as_bytes(),
-            );
+            eprintln!("Failed to spawn '{:?}': {}", executable, err);
             return Ok(None);
         }
     };
@@ -305,54 +371,122 @@ fn handle_external(cmd: &str, args: Vec<String>, pipes: &mut IOPipes) -> io::Res
     Ok(Some(child))
 }
 
-// FIXME: Fix these errors
-fn handle_cmd(cmd: &str, args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
+fn handle_cmd(
+    cmd: &str,
+    args: Vec<String>,
+    input: IOSource,
+    output: IOSource,
+    error: IOSource,
+) -> io::Result<(Option<Child>, Option<JoinHandle<io::Result<()>>>)> {
     match cmd {
-        "echo" => handle_echo(args, pipes),
-        "type" => handle_type(args, pipes),
-        "pwd" => handle_pwd(args, pipes),
-        "cd" => handle_cd(args, pipes),
-        "exit" => handle_exit(args, pipes),
-        _ => handle_external(cmd, args, pipes),
+        "echo" => {
+            let handle = thread::spawn(move || {
+                handle_echo(
+                    args,
+                    &mut IOPipes {
+                        input,
+                        output,
+                        error,
+                    },
+                )
+            });
+            Ok((None, Some(handle)))
+        }
+        "type" => {
+            let handle = thread::spawn(move || {
+                handle_type(
+                    args,
+                    &mut IOPipes {
+                        input,
+                        output,
+                        error,
+                    },
+                )
+            });
+            Ok((None, Some(handle)))
+        }
+        "pwd" => {
+            let handle = thread::spawn(move || {
+                handle_pwd(
+                    args,
+                    &mut IOPipes {
+                        input,
+                        output,
+                        error,
+                    },
+                )
+            });
+            Ok((None, Some(handle)))
+        }
+        "cd" => {
+            let handle = thread::spawn(move || {
+                handle_cd(
+                    args,
+                    &mut IOPipes {
+                        input,
+                        output,
+                        error,
+                    },
+                )
+            });
+            Ok((None, Some(handle)))
+        }
+        "exit" => {
+            let handle = thread::spawn(move || {
+                handle_exit(
+                    args,
+                    &mut IOPipes {
+                        input,
+                        output,
+                        error,
+                    },
+                )
+            });
+            Ok((None, Some(handle)))
+        }
+        _ => handle_external(cmd, args, input, output, error).map(|c| (c, None)),
     }
 }
 
 fn checks_redirects(
     redirect_path: Option<String>,
     append_path: Option<String>,
-) -> Option<impl Write> {
+) -> io::Result<Option<File>> {
     if let Some(ref path) = append_path {
-        return Some(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(false)
-                .open(path)
-                .unwrap_or_else(|_| panic!("Failed to append to {}!", path)),
-        );
+        return OpenOptions::new()
+            .create(true)
+            .append(true)
+            .write(true)
+            .truncate(false)
+            .open(path)
+            .map(|f| Some(f));
     };
 
     if let Some(ref path) = redirect_path {
-        return Some(
-            OpenOptions::new()
-                .create(true)
-                .append(false)
-                .truncate(true)
-                .open(path)
-                .unwrap_or_else(|_| panic!("Failed to write to {}!", path)),
-        );
+        return OpenOptions::new()
+            .create(true)
+            .append(false)
+            .write(true)
+            .truncate(true)
+            .open(path)
+            .map(|f| Some(f));
     };
 
-    return None;
+    return Ok(None);
 }
 
-// FIXME: Wait for children
 // OPTIONALLY: spawn threads for builtins with concurrency
 fn handle(inputs: Vec<String>) -> io::Result<()> {
-    let mut pipes = Vec::new();
+    let mut children = Vec::new();
+    let mut handles = Vec::new();
+
+    let mut pipe_readers = Vec::new();
+    let mut pipe_writers = Vec::new();
 
     for _ in 0..inputs.len() - 1 {
-        pipes.push(Some(pipe()?));
+        let (reader, writer) = pipe()?;
+        pipe_readers.push(Some(reader));
+        pipe_writers.push(Some(writer));
     }
 
     for (index, input) in inputs.iter().enumerate() {
@@ -364,44 +498,64 @@ fn handle(inputs: Vec<String>) -> io::Result<()> {
         let append_path = get_redirect(&mut args, vec![">>".to_string(), "1>>".to_string()]);
         let err_append_path = get_redirect(&mut args, vec!["2>>".to_string()]);
 
-        let input_reader: Box<dyn Read>;
-        let output_writer: Box<dyn Write>;
-        let error_writer: Box<dyn Write>;
+        let input_reader: IOSource;
+        let output_writer: IOSource;
+        let error_writer: IOSource;
 
         input_reader = if index == 0 {
-            Box::new(io::stdin())
+            IOSource::Stdin
         } else {
-            Box::new(
-                pipes[index - 1]
+            IOSource::PipeReader(
+                pipe_readers[index - 1]
                     .take()
-                    .expect("Pipe reader should be there!")
-                    .0,
+                    .expect("Pipe reader should be there!"),
             )
         };
 
-        output_writer = match checks_redirects(redirect_path, append_path) {
-            Some(file) => Box::new(file),
+        output_writer = match checks_redirects(redirect_path, append_path)? {
+            Some(file) => IOSource::File(file),
             None => {
                 if index + 1 == inputs.len() {
-                    Box::new(io::stdout())
+                    IOSource::Stdout
                 } else {
-                    Box::new(pipes[index].take().expect("Pipe writer should be there!").1)
+                    IOSource::PipeWriter(
+                        pipe_writers[index]
+                            .take()
+                            .expect("Pipe writer should be there!"),
+                    )
                 }
             }
         };
 
-        error_writer = match checks_redirects(err_redirect_path, err_append_path) {
-            Some(file) => Box::new(file),
-            None => Box::new(io::stderr()),
+        error_writer = match checks_redirects(err_redirect_path, err_append_path)? {
+            Some(file) => IOSource::File(file),
+            None => IOSource::Stderr,
         };
 
-        let mut io_pipes = IOPipes {
-            input: input_reader,
-            output: output_writer,
-            error: error_writer,
-        };
+        handle_cmd(
+            command.trim(),
+            args,
+            input_reader,
+            output_writer,
+            error_writer,
+        )
+        .map(|(child, handle)| {
+            if let Some(c) = child {
+                children.push(c);
+            }
 
-        handle_cmd(command.trim(), args, &mut io_pipes)?;
+            if let Some(h) = handle {
+                handles.push(h);
+            }
+        })?;
+    }
+
+    for handle in handles {
+        handle.join().expect("Failed joining handle")?;
+    }
+
+    for mut child in children {
+        child.wait()?;
     }
 
     Ok(())
