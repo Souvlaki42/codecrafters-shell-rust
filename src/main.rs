@@ -249,7 +249,7 @@ fn handle_history(args: Vec<String>, pipes: &mut IOPipes, history: Vec<String>) 
             let Ok(number) = arg.parse() else {
                 return pipes.error.write_all(help_msg);
             };
-            history.iter().rev().take(number).rev().collect_vec()
+            history.iter().rev().take(number).collect_vec()
         }
         None => history.iter().collect_vec(),
     };
@@ -257,7 +257,7 @@ fn handle_history(args: Vec<String>, pipes: &mut IOPipes, history: Vec<String>) 
     for (i, entry) in entries.iter().enumerate() {
         pipes
             .output
-            .write_all(format!("    {} {}\n", i + 1, entry).as_bytes())?;
+            .write_all(format!("    {}  {}\n", i + 1, entry).as_bytes())?;
     }
     Ok(())
 }
