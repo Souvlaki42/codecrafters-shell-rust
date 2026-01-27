@@ -244,7 +244,12 @@ fn handle_history(
     pipes: &mut IOPipes,
     editor: Arc<Mutex<Shell>>,
 ) -> io::Result<()> {
-    let help_msg = "Usage: history [[number of entries: optional (default: all)] or -r [file path to load history from]]\n".as_bytes();
+    let help_msg = "Usage: history [optional arguments]\n\
+      If no arguments are given, it will list all the command history it has.\n\
+      If <number> is given, it will list the last x commands in the command history.\n\
+      If -r <path> is given, it will load the lines in that path as command history.\n\
+      If -w <path> is given, it will write all command history in that path.\n"
+        .as_bytes();
 
     if args.len() > 2 {
         return pipes.error.write_all(help_msg);
@@ -254,7 +259,13 @@ fn handle_history(
 
     let number = args.first().and_then(|a| a.parse().ok());
 
-    let path = if args.first() == Some(&"-r".to_string()) {
+    let read_path = if args.first() == Some(&"-r".to_string()) {
+        args.get(1)
+    } else {
+        None
+    };
+
+    let write_path = if args.first() == Some(&"-w".to_string()) {
         args.get(1)
     } else {
         None
@@ -270,10 +281,15 @@ fn handle_history(
             .take(num)
             .rev()
             .collect_vec()
-    } else if let Some(file_path) = path {
+    } else if let Some(file_path) = read_path {
         editor
             .load_history(file_path)
             .unwrap_or_else(|_| panic!("Failed to load history from '{}'", file_path));
+        return Ok(());
+    } else if let Some(file_path) = write_path {
+        editor
+            .save_history(file_path)
+            .unwrap_or_else(|_| panic!("Failed to save history to '{}'", file_path));
         return Ok(());
     } else {
         editor.history().iter().enumerate().collect_vec()
