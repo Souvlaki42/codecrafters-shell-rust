@@ -3,7 +3,7 @@ use std::{
     env::{self, split_paths},
     fmt::Debug,
     fs::{self, File, OpenOptions},
-    io::{self, PipeReader, PipeWriter, Read, Write, pipe},
+    io::{self, BufRead, BufReader, PipeReader, PipeWriter, Read, Write, pipe},
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
     process::{self, Child, Command, Stdio},
@@ -282,14 +282,22 @@ fn handle_history(
             .rev()
             .collect_vec()
     } else if let Some(file_path) = read_path {
-        editor
-            .load_history(file_path)
-            .unwrap_or_else(|_| panic!("Failed to load history from '{}'", file_path));
+        let file = File::open(file_path)
+            .unwrap_or_else(|e| panic!("Failed to open '{}': {}", file_path, e));
+        for line in BufReader::new(file).lines() {
+            let line = line.unwrap();
+            editor
+                .add_history_entry(line)
+                .expect("Failed to add history entry!");
+        }
         return Ok(());
     } else if let Some(file_path) = write_path {
-        editor
-            .save_history(file_path)
-            .unwrap_or_else(|_| panic!("Failed to save history to '{}'", file_path));
+        let mut file = File::create(file_path)
+            .unwrap_or_else(|e| panic!("Failed to create '{}': {}", file_path, e));
+        for entry in editor.history().iter() {
+            file.write_all(format!("{}\n", entry).as_bytes())
+                .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
+        }
         return Ok(());
     } else {
         editor.history().iter().enumerate().collect_vec()
