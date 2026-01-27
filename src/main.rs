@@ -248,7 +248,8 @@ fn handle_history(
       If no arguments are given, it will list all the command history it has.\n\
       If <number> is given, it will list the last x commands in the command history.\n\
       If -r <path> is given, it will load the lines in that path as command history.\n\
-      If -w <path> is given, it will write all command history in that path.\n"
+      If -w <path> is given, it will write all command history in that path.\n\"
+      If -a <path> is given, it will append all command history in that path.\n"
         .as_bytes();
 
     if args.len() > 2 {
@@ -266,6 +267,12 @@ fn handle_history(
     };
 
     let write_path = if args.first() == Some(&"-w".to_string()) {
+        args.get(1)
+    } else {
+        None
+    };
+
+    let append_path = if args.first() == Some(&"-a".to_string()) {
         args.get(1)
     } else {
         None
@@ -294,6 +301,17 @@ fn handle_history(
     } else if let Some(file_path) = write_path {
         let mut file = File::create(file_path)
             .unwrap_or_else(|e| panic!("Failed to create '{}': {}", file_path, e));
+        for entry in editor.history().iter() {
+            file.write_all(format!("{}\n", entry).as_bytes())
+                .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
+        }
+        return Ok(());
+    } else if let Some(file_path) = append_path {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file_path)
+            .unwrap_or_else(|e| panic!("Failed to open '{}': {}", file_path, e));
         for entry in editor.history().iter() {
             file.write_all(format!("{}\n", entry).as_bytes())
                 .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
