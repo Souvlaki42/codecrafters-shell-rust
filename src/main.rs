@@ -255,7 +255,7 @@ fn handle_history(
     let number = args.first().and_then(|a| a.parse().ok());
 
     let path = if args.first() == Some(&"-r".to_string()) {
-        args.get(1).take()
+        args.get(1)
     } else {
         None
     };
@@ -273,8 +273,8 @@ fn handle_history(
     } else if let Some(file_path) = path {
         editor
             .load_history(file_path)
-            .expect(format!("Failed to load history from '{}'", file_path).as_str());
-        editor.history().iter().enumerate().collect_vec()
+            .unwrap_or_else(|_| panic!("Failed to load history from '{}'", file_path));
+        return Ok(());
     } else {
         editor.history().iter().enumerate().collect_vec()
     };
@@ -633,7 +633,13 @@ fn main() -> io::Result<()> {
             .expect("Couldn't lock the editor!")
             .readline("$ ")
         {
-            Ok(line) => line,
+            Ok(line) => {
+                if line.is_empty() {
+                    continue;
+                } else {
+                    line
+                }
+            }
             Err(ReadlineError::Interrupted) => {
                 println!("^C");
                 continue;
