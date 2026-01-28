@@ -4,7 +4,6 @@ use std::{
     fmt::Debug,
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, PipeReader, PipeWriter, Read, Write, pipe},
-    ops::AddAssign,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::PathBuf,
     process::{self, Child, Command, Stdio},
@@ -244,7 +243,6 @@ fn handle_history(
     args: Vec<String>,
     pipes: &mut IOPipes,
     editor: Arc<Mutex<Shell>>,
-    since_append: Arc<Mutex<usize>>,
 ) -> io::Result<()> {
     let help_msg = "Usage: history [optional arguments]\n\
       If no arguments are given, it will list all the command history it has.\n\
@@ -280,6 +278,15 @@ fn handle_history(
         None
     };
 
+    if args.first().is_some()
+        && number.is_none()
+        && read_path.is_none()
+        && write_path.is_none()
+        && append_path.is_none()
+    {
+        return pipes.error.write_all(help_msg);
+    }
+
     let history = editor.history().iter().cloned().collect_vec();
 
     if let Some(file_path) = read_path {
@@ -301,21 +308,6 @@ fn handle_history(
             file.write_all(format!("{}\n", entry).as_bytes())
                 .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
         }
-        return Ok(());
-    }
-
-    if let Some(file_path) = append_path {
-        let mut since_append = since_append.lock().expect("Couldn't lock the counter!");
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(file_path)
-            .unwrap_or_else(|e| panic!("Failed to open '{}': {}", file_path, e));
-        for entry in editor.history().iter().skip(*since_append) {
-            file.write_all(format!("{}\n", entry).as_bytes())
-                .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
-        }
-        *since_append = 0;
         return Ok(());
     }
 
@@ -469,7 +461,6 @@ fn handle_cmd(
     input: IOSource,
     output: IOSource,
     error: IOSource,
-    since_append: Arc<Mutex<usize>>,
 ) -> io::Result<(Option<Child>, Option<IOJoinHandle>)> {
     match cmd {
         "echo" => {
@@ -547,7 +538,6 @@ fn handle_cmd(
                         error,
                     },
                     Arc::clone(&editor),
-                    since_append.clone(),
                 )
             });
             Ok((None, Some(handle)))
@@ -582,11 +572,7 @@ fn checks_redirects(
     Ok(None)
 }
 
-fn handle(
-    inputs: Vec<String>,
-    editor: Arc<Mutex<Shell>>,
-    since_append: Arc<Mutex<usize>>,
-) -> io::Result<()> {
+fn handle(inputs: Vec<String>, editor: Arc<Mutex<Shell>>) -> io::Result<()> {
     let mut children = Vec::new();
     let mut handles = Vec::new();
 
@@ -645,7 +631,6 @@ fn handle(
             input_reader,
             output_writer,
             error_writer,
-            since_append.clone(),
         )
         .map(|(child, handle)| {
             if let Some(c) = child {
@@ -686,7 +671,6 @@ fn main() -> io::Result<()> {
 
     let editor = Arc::new(Mutex::new(editor));
 
-    let since_append = Arc::new(Mutex::new(0usize));
     loop {
         let line = match editor
             .lock()
@@ -715,12 +699,7 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        handle(inputs, Arc::clone(&editor), since_append.clone())?;
-
-        since_append
-            .lock()
-            .expect("Couldn't finish command execution!")
-            .add_assign(1);
+        handle(inputs, Arc::clone(&editor))?;
     }
 
     Ok(())
