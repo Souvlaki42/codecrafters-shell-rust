@@ -728,6 +728,10 @@ fn main() -> io::Result<()> {
     let editor = Arc::new(Mutex::new(editor));
     let append_history = Arc::new(Mutex::new(Vec::new()));
 
+    let history_file = env::var("HISTFILE").ok();
+
+    _ = history_read(Arc::clone(&editor), history_file.as_ref());
+
     loop {
         let line = match editor
             .lock()
