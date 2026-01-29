@@ -233,6 +233,60 @@ fn get_redirect(args: &mut Vec<String>, redirect_pipes: Vec<String>) -> Option<S
     }
 }
 
+fn history_read(editor: Arc<Mutex<Shell>>, read_path: Option<&String>) -> bool {
+    if let Some(file_path) = read_path {
+        let file = File::open(file_path)
+            .unwrap_or_else(|e| panic!("Failed to open '{}': {}", file_path, e));
+        for line in BufReader::new(file).lines() {
+            let line = line.unwrap();
+            editor
+                .lock()
+                .expect("Failed to lock the editor!")
+                .add_history_entry(line)
+                .expect("Failed to add history entry!");
+        }
+        return true;
+    }
+    false
+}
+
+fn history_write(editor: Arc<Mutex<Shell>>, write_path: Option<&String>) -> bool {
+    if let Some(file_path) = write_path {
+        let mut file = File::create(file_path)
+            .unwrap_or_else(|e| panic!("Failed to create '{}': {}", file_path, e));
+        for entry in editor
+            .lock()
+            .expect("Failed to lock the editor!")
+            .history()
+            .iter()
+        {
+            file.write_all(format!("{}\n", entry).as_bytes())
+                .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
+        }
+        return true;
+    }
+    false
+}
+
+fn history_append(append_history: Arc<Mutex<Vec<String>>>, append_path: Option<&String>) -> bool {
+    if let Some(file_path) = append_path {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(file_path)
+            .expect(format!("Failed to open '{}'", file_path).as_str());
+        let mut append_history = append_history
+            .lock()
+            .expect("Failed to lock append history!");
+        for line in append_history.iter() {
+            file.write_all(format!("{}\n", line).as_bytes())
+                .unwrap_or_else(|e| panic!("Failed to append to '{}': {}", file_path, e));
+        }
+        append_history.clear();
+        return true;
+    }
+    false
+}
+
 fn handle_echo(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     pipes
         .output
