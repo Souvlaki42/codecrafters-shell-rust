@@ -735,6 +735,7 @@ fn main() -> io::Result<()> {
 
     editor.set_helper(Some(shell_helper));
     editor.set_history_ignore_space(true);
+    _ = editor.set_history_ignore_dups(false);
     editor.set_auto_add_history(true);
 
     let editor = Arc::new(Mutex::new(editor));
