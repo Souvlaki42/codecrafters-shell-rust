@@ -243,6 +243,7 @@ fn handle_history(
     args: Vec<String>,
     pipes: &mut IOPipes,
     editor: Arc<Mutex<Shell>>,
+    append_history: Arc<Mutex<Vec<String>>>,
 ) -> io::Result<()> {
     let help_msg = "Usage: history [optional arguments]\n\
       If no arguments are given, it will list all the command history it has.\n\
@@ -308,6 +309,22 @@ fn handle_history(
             file.write_all(format!("{}\n", entry).as_bytes())
                 .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
         }
+        return Ok(());
+    }
+
+    if let Some(file_path) = append_path {
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(file_path)
+            .expect(format!("Failed to open '{}'", file_path).as_str());
+        let mut append_history = append_history
+            .lock()
+            .expect("Failed to lock append history!");
+        for line in append_history.iter() {
+            file.write_all(format!("{}\n", line).as_bytes())
+                .unwrap_or_else(|e| panic!("Failed to append to '{}': {}", file_path, e));
+        }
+        append_history.clear();
         return Ok(());
     }
 
@@ -458,6 +475,7 @@ fn handle_cmd(
     cmd: &str,
     args: Vec<String>,
     editor: Arc<Mutex<Shell>>,
+    append_history: Arc<Mutex<Vec<String>>>,
     input: IOSource,
     output: IOSource,
     error: IOSource,
@@ -538,6 +556,7 @@ fn handle_cmd(
                         error,
                     },
                     Arc::clone(&editor),
+                    Arc::clone(&append_history),
                 )
             });
             Ok((None, Some(handle)))
@@ -572,7 +591,11 @@ fn checks_redirects(
     Ok(None)
 }
 
-fn handle(inputs: Vec<String>, editor: Arc<Mutex<Shell>>) -> io::Result<()> {
+fn handle(
+    inputs: Vec<String>,
+    editor: Arc<Mutex<Shell>>,
+    append_history: Arc<Mutex<Vec<String>>>,
+) -> io::Result<()> {
     let mut children = Vec::new();
     let mut handles = Vec::new();
 
@@ -628,6 +651,7 @@ fn handle(inputs: Vec<String>, editor: Arc<Mutex<Shell>>) -> io::Result<()> {
             command.trim(),
             args,
             Arc::clone(&editor),
+            Arc::clone(&append_history),
             input_reader,
             output_writer,
             error_writer,
@@ -670,6 +694,7 @@ fn main() -> io::Result<()> {
     editor.set_auto_add_history(true);
 
     let editor = Arc::new(Mutex::new(editor));
+    let append_history = Arc::new(Mutex::new(Vec::new()));
 
     loop {
         let line = match editor
@@ -681,6 +706,10 @@ fn main() -> io::Result<()> {
                 if line.is_empty() {
                     continue;
                 } else {
+                    append_history
+                        .lock()
+                        .expect("Tried to lock!")
+                        .push(line.clone());
                     line
                 }
             }
@@ -699,7 +728,7 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        handle(inputs, Arc::clone(&editor))?;
+        handle(inputs, Arc::clone(&editor), Arc::clone(&append_history))?;
     }
 
     Ok(())
