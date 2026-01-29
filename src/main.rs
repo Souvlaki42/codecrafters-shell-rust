@@ -311,8 +311,6 @@ fn handle_history(
         return pipes.error.write_all(help_msg);
     }
 
-    let mut editor = editor.lock().expect("Couldn't lock the editor!");
-
     let number = args.first().and_then(|a| a.parse().ok());
 
     let read_path = if args.first() == Some(&"-r".to_string()) {
@@ -342,43 +340,23 @@ fn handle_history(
         return pipes.error.write_all(help_msg);
     }
 
-    let history = editor.history().iter().cloned().collect_vec();
+    let history = editor
+        .lock()
+        .expect("Couldn't lock the editor!")
+        .history()
+        .iter()
+        .cloned()
+        .collect_vec();
 
-    if let Some(file_path) = read_path {
-        let file = File::open(file_path)
-            .unwrap_or_else(|e| panic!("Failed to open '{}': {}", file_path, e));
-        for line in BufReader::new(file).lines() {
-            let line = line.unwrap();
-            editor
-                .add_history_entry(line)
-                .expect("Failed to add history entry!");
-        }
+    if history_read(Arc::clone(&editor), read_path) {
         return Ok(());
     }
 
-    if let Some(file_path) = write_path {
-        let mut file = File::create(file_path)
-            .unwrap_or_else(|e| panic!("Failed to create '{}': {}", file_path, e));
-        for entry in editor.history().iter() {
-            file.write_all(format!("{}\n", entry).as_bytes())
-                .unwrap_or_else(|e| panic!("Failed to write to '{}': {}", file_path, e));
-        }
+    if history_write(Arc::clone(&editor), write_path) {
         return Ok(());
     }
 
-    if let Some(file_path) = append_path {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .open(file_path)
-            .expect(format!("Failed to open '{}'", file_path).as_str());
-        let mut append_history = append_history
-            .lock()
-            .expect("Failed to lock append history!");
-        for line in append_history.iter() {
-            file.write_all(format!("{}\n", line).as_bytes())
-                .unwrap_or_else(|e| panic!("Failed to append to '{}': {}", file_path, e));
-        }
-        append_history.clear();
+    if history_append(append_history, append_path) {
         return Ok(());
     }
 
@@ -391,7 +369,7 @@ fn handle_history(
             .rev()
             .collect_vec()
     } else {
-        editor.history().iter().enumerate().collect_vec()
+        history.iter().enumerate().collect_vec()
     };
 
     for (index, entry) in entries {
