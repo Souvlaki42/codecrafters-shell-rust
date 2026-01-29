@@ -462,12 +462,19 @@ fn handle_cd(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
     }
 }
 
-fn handle_exit(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
+fn handle_exit(
+    args: Vec<String>,
+    pipes: &mut IOPipes,
+    editor: Arc<Mutex<Shell>>,
+    history_path: Option<String>,
+) -> io::Result<()> {
     if args.len() > 1 {
         return pipes
             .error
             .write_all("Usage: exit [exit_code: optional (default: 0)]\n".as_bytes());
     }
+
+    _ = history_write(Arc::clone(&editor), history_path.as_ref());
 
     let exit_code = args.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     process::exit(exit_code);
@@ -511,6 +518,7 @@ fn handle_cmd(
     input: IOSource,
     output: IOSource,
     error: IOSource,
+    history_path: Option<String>,
 ) -> io::Result<(Option<Child>, Option<IOJoinHandle>)> {
     match cmd {
         "echo" => {
@@ -574,6 +582,8 @@ fn handle_cmd(
                         output,
                         error,
                     },
+                    Arc::clone(&editor),
+                    history_path,
                 )
             });
             Ok((None, Some(handle)))
@@ -627,6 +637,7 @@ fn handle(
     inputs: Vec<String>,
     editor: Arc<Mutex<Shell>>,
     append_history: Arc<Mutex<Vec<String>>>,
+    history_path: Option<String>,
 ) -> io::Result<()> {
     let mut children = Vec::new();
     let mut handles = Vec::new();
@@ -687,6 +698,7 @@ fn handle(
             input_reader,
             output_writer,
             error_writer,
+            history_path.clone(),
         )
         .map(|(child, handle)| {
             if let Some(c) = child {
@@ -764,8 +776,14 @@ fn main() -> io::Result<()> {
         };
 
         let inputs = line.split("|").map(|s| s.trim().to_string()).collect_vec();
-        handle(inputs, Arc::clone(&editor), Arc::clone(&append_history))?;
+        handle(
+            inputs,
+            Arc::clone(&editor),
+            Arc::clone(&append_history),
+            history_file.clone(),
+        )?;
     }
 
+    _ = history_write(Arc::clone(&editor), history_file.as_ref());
     Ok(())
 }
