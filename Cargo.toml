@@ -6,8 +6,8 @@ edition = "2024"
 rust-version = "1.92"
 
 [dependencies]
-anyhow = "1.0.100"                                         # error handling
-bytes = "1.11.0"                                           # helps manage buffers
+anyhow = "1.0.101"                                         # error handling
+bytes = "1.11.1"                                           # helps manage buffers
 thiserror = "2.0.18"                                      # error handling
 
 itertools = "0.14.0"
