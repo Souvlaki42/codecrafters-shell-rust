@@ -1,7 +1,6 @@
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     env::{self, split_paths},
-    fmt::Debug,
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, PipeReader, PipeWriter, Read, Write, pipe},
     os::unix::{fs::PermissionsExt, process::CommandExt},
@@ -25,7 +24,6 @@ const BUILTINS: [&str; 6] = ["echo", "type", "exit", "pwd", "cd", "history"];
 type IOJoinHandle = JoinHandle<io::Result<()>>;
 type Shell = Editor<ShellHelper, FileHistory>;
 
-#[derive(Debug)]
 enum IOSource {
     PipeReader(PipeReader),
     PipeWriter(PipeWriter),
@@ -101,8 +99,24 @@ struct IOPipes {
     error: IOSource,
 }
 
-#[derive(Debug, Helper, Validator, Highlighter, Hinter)]
-struct ShellHelper;
+#[derive(Helper, Validator, Highlighter, Hinter)]
+struct ShellHelper {
+    executables: Arc<BTreeMap<String, PathBuf>>,
+    commands: Vec<String>,
+}
+
+impl ShellHelper {
+    fn new() -> Self {
+        let executables = get_external_executables();
+        let mut commands = BUILTINS.map(String::from).to_vec();
+        commands.extend(executables.keys().cloned());
+
+        Self {
+            executables: Arc::new(executables),
+            commands,
+        }
+    }
+}
 
 impl Completer for ShellHelper {
     type Candidate = Pair;
@@ -115,13 +129,8 @@ impl Completer for ShellHelper {
         let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
         let prefix = &line[start..pos].to_lowercase();
 
-        let builtins = BUILTINS.map(String::from).to_vec();
-        let executables = get_external_executables();
-
-        let mut commands = Vec::from_iter(executables.keys().cloned());
-        commands.extend(builtins);
-
-        let mut matches: Vec<Pair> = commands
+        let matches: Vec<Pair> = self
+            .commands
             .iter()
             .filter(|cmd| cmd.to_lowercase().starts_with(prefix))
             .map(|cmd| Pair {
@@ -130,15 +139,13 @@ impl Completer for ShellHelper {
             })
             .collect();
 
-        matches.sort_by(|a, b| a.display.cmp(&b.display));
-
         Ok((start, matches))
     }
 }
 
-fn get_external_executables() -> HashMap<String, PathBuf> {
+fn get_external_executables() -> BTreeMap<String, PathBuf> {
     let path = env::var("PATH").expect("Failed to fetch PATH!");
-    let mut results = HashMap::new();
+    let mut results = BTreeMap::new();
     for dir in split_paths(&path) {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -380,7 +387,11 @@ fn handle_history(
     Ok(())
 }
 
-fn handle_type(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
+fn handle_type(
+    args: Vec<String>,
+    pipes: &mut IOPipes,
+    executables: Arc<BTreeMap<String, PathBuf>>,
+) -> io::Result<()> {
     let help_msg = "Usage: type [command: required]\n".as_bytes();
 
     if args.len() != 1 {
@@ -391,13 +402,11 @@ fn handle_type(args: Vec<String>, pipes: &mut IOPipes) -> io::Result<()> {
         return pipes.error.write_all(help_msg);
     };
 
-    let externals = get_external_executables();
-
     if BUILTINS.contains(&cmd.as_str()) {
         pipes
             .output
             .write_all(format!("{} is a shell builtin\n", cmd).as_bytes())
-    } else if let Some(path) = externals.get(cmd) {
+    } else if let Some(path) = executables.get(cmd) {
         pipes
             .output
             .write_all(format!("{} is {}\n", cmd, path.to_string_lossy()).as_bytes())
@@ -485,9 +494,9 @@ fn handle_external(
     input: IOSource,
     output: IOSource,
     mut error: IOSource,
+    executables: Arc<BTreeMap<String, PathBuf>>,
 ) -> io::Result<Option<Child>> {
-    let externals = get_external_executables();
-    let Some(executable) = externals.get(cmd) else {
+    let Some(executable) = executables.get(cmd) else {
         error.write_all(format!("{}: command not found\n", cmd).as_bytes())?;
         return Ok(None);
     };
@@ -520,6 +529,14 @@ fn handle_cmd(
     error: IOSource,
     history_path: Option<String>,
 ) -> io::Result<(Option<Child>, Option<IOJoinHandle>)> {
+    let executables = Arc::clone(
+        &editor
+            .lock()
+            .expect("Failed to lock editor!")
+            .helper()
+            .expect("No helper present")
+            .executables,
+    );
     match cmd {
         "echo" => {
             let handle = thread::spawn(move || {
@@ -543,6 +560,7 @@ fn handle_cmd(
                         output,
                         error,
                     },
+                    executables,
                 )
             });
             Ok((None, Some(handle)))
@@ -603,7 +621,7 @@ fn handle_cmd(
             });
             Ok((None, Some(handle)))
         }
-        _ => handle_external(cmd, args, input, output, error).map(|c| (c, None)),
+        _ => handle_external(cmd, args, input, output, error, executables).map(|c| (c, None)),
     }
 }
 
@@ -726,7 +744,7 @@ fn handle(
 // TODO: input redirection
 // TODO: variable expansion
 fn main() -> io::Result<()> {
-    let shell_helper = ShellHelper {};
+    let shell_helper = ShellHelper::new();
     let config = Config::builder()
         .bell_style(BellStyle::Audible)
         .completion_type(CompletionType::List)
