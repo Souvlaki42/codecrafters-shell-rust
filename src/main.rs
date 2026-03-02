@@ -163,9 +163,18 @@ impl Completer for ShellHelper {
 
         let matches = match_db
             .iter()
-            .map(|cmd| Pair {
-                display: cmd.to_string(),
-                replacement: cmd.to_string() + " ",
+            .map(|mat| {
+                let path = PathBuf::from(mat);
+                let display = path.to_string_lossy().to_string();
+                let replacement = if path.is_dir() {
+                    display.clone() + "/"
+                } else {
+                    display.clone() + " "
+                };
+                Pair {
+                    display,
+                    replacement,
+                }
             })
             .collect();
 
