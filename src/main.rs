@@ -137,12 +137,9 @@ impl Completer for ShellHelper {
                 .filter(|c| c.to_lowercase().starts_with(prefix)),
         );
 
-        let split_path = prefix.split(MAIN_SEPARATOR_STR).collect_vec();
+        let path_split = prefix.rsplit_once(MAIN_SEPARATOR_STR);
 
-        let file_matches = if split_path.len() > 1 {
-            let (file, paths) = split_path.split_last().unwrap();
-            let path = &paths.join(MAIN_SEPARATOR_STR);
-
+        let file_matches = if let Some((path, file)) = path_split {
             fs::read_dir(path)
                 .expect(format!("Failed to read {:?} directory!", path).as_str())
                 .filter_map(|entry| entry.map(|e| e.path()).ok())
