@@ -129,8 +129,19 @@ impl Completer for ShellHelper {
         let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
         let prefix = &line[start..pos].to_lowercase();
 
-        let matches: Vec<Pair> = self
-            .commands
+        let mut match_db = self.commands.clone();
+
+        let paths = fs::read_dir("./")
+            .expect("Failed to read current directory!")
+            .filter_map(|entry| {
+                entry
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .ok()
+            });
+
+        match_db.extend(paths);
+
+        let matches: Vec<Pair> = match_db
             .iter()
             .filter(|cmd| cmd.to_lowercase().starts_with(prefix))
             .map(|cmd| Pair {
