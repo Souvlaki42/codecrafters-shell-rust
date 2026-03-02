@@ -129,13 +129,30 @@ impl Completer for ShellHelper {
         let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
         let prefix = &line[start..pos].to_lowercase();
 
-        let mut match_db = Vec::new();
+        let complete_files = line
+            .split("|")
+            .last()
+            .map(|t| t.trim().contains(" "))
+            .unwrap();
 
-        match_db.extend(
-            self.commands
-                .iter()
-                .filter(|c| c.to_lowercase().starts_with(prefix)),
-        );
+        if !complete_files {
+            return Ok((
+                start,
+                self.commands
+                    .iter()
+                    .filter_map(|cmd| {
+                        if cmd.to_lowercase().starts_with(prefix) {
+                            Some(Pair {
+                                display: cmd.to_string(),
+                                replacement: cmd.to_string() + " ",
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect_vec(),
+            ));
+        }
 
         let path_split = prefix.rsplit_once(MAIN_SEPARATOR_STR);
 
@@ -143,13 +160,13 @@ impl Completer for ShellHelper {
             fs::read_dir(path)
                 .expect(format!("Failed to read {:?} directory!", path).as_str())
                 .filter_map(|entry| entry.map(|e| e.path()).ok())
-                .filter(|f| {
-                    let Some(file_name) = f.file_name() else {
+                .filter(|p| {
+                    let Some(file_name) = p.file_name() else {
                         return false;
                     };
                     file_name.to_string_lossy().to_lowercase().starts_with(file)
                 })
-                .map(|f| f.display().to_string())
+                .map(|p| p.display().to_string())
                 .collect_vec()
         } else {
             fs::read_dir("./")
@@ -159,9 +176,7 @@ impl Completer for ShellHelper {
                 .collect_vec()
         };
 
-        match_db.extend(file_matches.iter());
-
-        let matches = match_db
+        let matches = file_matches
             .iter()
             .map(|mat| {
                 let path = PathBuf::from(mat);
