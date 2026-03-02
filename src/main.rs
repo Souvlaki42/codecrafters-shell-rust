@@ -4,7 +4,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufRead, BufReader, PipeReader, PipeWriter, Read, Write, pipe},
     os::unix::{fs::PermissionsExt, process::CommandExt},
-    path::PathBuf,
+    path::{MAIN_SEPARATOR_STR, PathBuf},
     process::{self, Child, Command, Stdio},
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
@@ -129,21 +129,43 @@ impl Completer for ShellHelper {
         let start = line[..pos].rfind(' ').map_or(0, |i| i + 1);
         let prefix = &line[start..pos].to_lowercase();
 
-        let mut match_db = self.commands.clone();
+        let mut match_db = Vec::new();
 
-        let paths = fs::read_dir("./")
-            .expect("Failed to read current directory!")
-            .filter_map(|entry| {
-                entry
-                    .map(|e| e.file_name().to_string_lossy().to_string())
-                    .ok()
-            });
+        match_db.extend(
+            self.commands
+                .iter()
+                .filter(|c| c.to_lowercase().starts_with(prefix)),
+        );
 
-        match_db.extend(paths);
+        let split_path = prefix.split(MAIN_SEPARATOR_STR).collect_vec();
 
-        let matches: Vec<Pair> = match_db
+        let file_matches = if split_path.len() > 1 {
+            let (file, paths) = split_path.split_last().unwrap();
+            let path = &paths.join(MAIN_SEPARATOR_STR);
+
+            fs::read_dir(path)
+                .expect(format!("Failed to read {:?} directory!", path).as_str())
+                .filter_map(|entry| entry.map(|e| e.path()).ok())
+                .filter(|f| {
+                    let Some(file_name) = f.file_name() else {
+                        return false;
+                    };
+                    file_name.to_string_lossy().to_lowercase().starts_with(file)
+                })
+                .map(|f| f.display().to_string())
+                .collect_vec()
+        } else {
+            fs::read_dir("./")
+                .expect("Failed to read current directory!")
+                .filter_map(|entry| entry.map(|e| e.file_name().display().to_string()).ok())
+                .filter(|f| f.to_lowercase().starts_with(prefix))
+                .collect_vec()
+        };
+
+        match_db.extend(file_matches.iter());
+
+        let matches = match_db
             .iter()
-            .filter(|cmd| cmd.to_lowercase().starts_with(prefix))
             .map(|cmd| Pair {
                 display: cmd.to_string(),
                 replacement: cmd.to_string() + " ",
